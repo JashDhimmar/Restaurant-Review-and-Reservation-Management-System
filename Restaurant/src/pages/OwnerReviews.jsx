@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { mockApi } from '@/services/api';
+import OwnerSidebar from '@/components/owner/OwnerSidebar';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { 
+import {
   Star,
   MessageSquare,
   TrendingUp,
@@ -69,9 +70,9 @@ export default function OwnerReviews() {
 
   useEffect(() => {
     const loadUser = async () => {
-      const isAuth = await base44.auth.isAuthenticated();
+      const isAuth = await mockApi.auth.isAuthenticated();
       if (isAuth) {
-        const userData = await base44.auth.me();
+        const userData = await mockApi.auth.me();
         setUser(userData);
       }
     };
@@ -80,7 +81,7 @@ export default function OwnerReviews() {
 
   const { data: restaurants = [] } = useQuery({
     queryKey: ['owner-restaurants', user?.email],
-    queryFn: () => base44.entities.Restaurant.filter({ owner_email: user.email }),
+    queryFn: () => mockApi.entities.Restaurant.filter({ owner_email: user.email }),
     enabled: !!user?.email,
   });
 
@@ -88,12 +89,12 @@ export default function OwnerReviews() {
 
   const { data: reviews = [], isLoading } = useQuery({
     queryKey: ['owner-reviews', restaurant?.id],
-    queryFn: () => base44.entities.Review.filter({ restaurant_id: restaurant.id }, '-created_date'),
+    queryFn: () => mockApi.entities.Review.filter({ restaurant_id: restaurant.id }, '-created_date'),
     enabled: !!restaurant?.id,
   });
 
   const updateReview = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Review.update(id, data),
+    mutationFn: ({ id, data }) => mockApi.entities.Review.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['owner-reviews'] });
       setSelectedReview(null);
@@ -133,7 +134,7 @@ export default function OwnerReviews() {
       if (searchQuery) {
         const search = searchQuery.toLowerCase();
         if (!review.review_text?.toLowerCase().includes(search) &&
-            !review.reviewer_name?.toLowerCase().includes(search)) {
+          !review.reviewer_name?.toLowerCase().includes(search)) {
           return false;
         }
       }
@@ -153,41 +154,22 @@ export default function OwnerReviews() {
 
   const generateAIInsights = async () => {
     if (reviews.length === 0) return;
-    
+
     setIsGeneratingInsights(true);
-    
-    const reviewTexts = reviews.slice(0, 20).map(r => ({
-      rating: r.overall_rating,
-      text: r.review_text,
-      sentiment: r.sentiment
-    }));
 
-    const result = await base44.integrations.Core.InvokeLLM({
-      prompt: `Analyze these restaurant reviews and provide insights:
-        
-${JSON.stringify(reviewTexts, null, 2)}
+    // In our mock implementation, we don't have access to the AI. So, mock response.
+    // Delay slightly to show standard loading symbol
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
-Provide a JSON response with:
-1. summary: A brief 2-3 sentence summary of overall customer sentiment
-2. strengths: Array of 3-5 positive themes customers mention
-3. improvements: Array of 3-5 areas for improvement based on feedback
-4. keywords: Array of most frequently mentioned positive and negative keywords`,
-      response_json_schema: {
-        type: "object",
-        properties: {
-          summary: { type: "string" },
-          strengths: { type: "array", items: { type: "string" } },
-          improvements: { type: "array", items: { type: "string" } },
-          keywords: { 
-            type: "object",
-            properties: {
-              positive: { type: "array", items: { type: "string" } },
-              negative: { type: "array", items: { type: "string" } }
-            }
-          }
-        }
+    const result = {
+      summary: "Customer sentiment is largely positive, focusing on great service and excellent quality. Several diners pointed out some longer wait times on weekends.",
+      strengths: ["Great service", "Excellent food", "Good atmosphere"],
+      improvements: ["Wait times", "Noise levels", "Parking availability"],
+      keywords: {
+        positive: ["delicious", "friendly", "amazing"],
+        negative: ["loud", "slow", "expensive"]
       }
-    });
+    };
 
     setAiInsights(result);
     setIsGeneratingInsights(false);
@@ -195,7 +177,7 @@ Provide a JSON response with:
 
   const handleSubmitResponse = async () => {
     if (!selectedReview || !responseText.trim()) return;
-    
+
     await updateReview.mutateAsync({
       id: selectedReview.id,
       data: { owner_response: responseText }
@@ -208,9 +190,8 @@ Provide a JSON response with:
         {[1, 2, 3, 4, 5].map((star) => (
           <Star
             key={star}
-            className={`w-4 h-4 ${
-              star <= rating ? 'fill-amber-400 text-amber-400' : 'text-stone-200'
-            }`}
+            className={`w-4 h-4 ${star <= rating ? 'fill-amber-400 text-amber-400' : 'text-stone-200'
+              }`}
           />
         ))}
       </div>
@@ -218,26 +199,21 @@ Provide a JSON response with:
   };
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      {/* Header */}
-      <div className="bg-white border-b border-stone-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <Link 
-            to={createPageUrl('OwnerDashboard')}
-            className="inline-flex items-center gap-2 text-stone-500 hover:text-stone-700 mb-4"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Back to Dashboard
-          </Link>
-          <div className="flex items-center justify-between">
+    <div className="flex min-h-screen bg-stone-50">
+      <OwnerSidebar activePage="reviews" />
+
+      <div className="flex-1 min-w-0">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
+          {/* Header */}
+          <div className="mb-8 flex items-center justify-between">
             <div>
               <h1 className="font-display text-2xl font-bold text-stone-900">Review Insights</h1>
-              <p className="text-stone-500">Understand what your customers are saying</p>
+              <p className="text-stone-500">Understand and respond to customer feedback</p>
             </div>
-            <Button 
+            <Button
               onClick={generateAIInsights}
               disabled={isGeneratingInsights || reviews.length === 0}
-              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 gap-2"
+              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 gap-2 shadow-sm rounded-xl"
             >
               {isGeneratingInsights ? (
                 <>
@@ -252,275 +228,270 @@ Provide a JSON response with:
               )}
             </Button>
           </div>
-        </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Overview */}
-        {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
-            <Card className="rounded-xl border-stone-200">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm text-stone-500 mb-1">Overall</p>
-                <div className="flex items-center justify-center gap-1">
-                  <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
-                  <span className="text-2xl font-bold">{stats.avgRating.toFixed(1)}</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-stone-200">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm text-stone-500 mb-1">Food</p>
-                <p className="text-2xl font-bold">{stats.avgFood.toFixed(1)}</p>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-stone-200">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm text-stone-500 mb-1">Service</p>
-                <p className="text-2xl font-bold">{stats.avgService.toFixed(1)}</p>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-stone-200">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm text-stone-500 mb-1">Ambiance</p>
-                <p className="text-2xl font-bold">{stats.avgAmbiance.toFixed(1)}</p>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-stone-200">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm text-stone-500 mb-1">Value</p>
-                <p className="text-2xl font-bold">{stats.avgValue.toFixed(1)}</p>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* AI Insights Panel */}
-        {aiInsights && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
-          >
-            <Card className="rounded-2xl border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-amber-500" />
-                  AI-Powered Insights
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <h4 className="font-medium text-stone-900 mb-2">Summary</h4>
-                  <p className="text-stone-600">{aiInsights.summary}</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h4 className="font-medium text-emerald-700 mb-3 flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4" />
-                      Strengths
-                    </h4>
-                    <ul className="space-y-2">
-                      {aiInsights.strengths?.map((item, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-sm text-stone-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
+          {/* Stats Overview */}
+          {stats && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
+              <Card className="rounded-2xl border-stone-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Overall</p>
+                  <div className="flex items-center justify-center gap-1">
+                    <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+                    <span className="text-2xl font-bold text-stone-900">{stats.avgRating.toFixed(1)}</span>
                   </div>
-                  <div>
-                    <h4 className="font-medium text-red-700 mb-3 flex items-center gap-2">
-                      <TrendingDown className="w-4 h-4" />
-                      Areas for Improvement
-                    </h4>
-                    <ul className="space-y-2">
-                      {aiInsights.improvements?.map((item, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-sm text-stone-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-                {aiInsights.keywords && (
-                  <div>
-                    <h4 className="font-medium text-stone-900 mb-3">Keywords</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {aiInsights.keywords.positive?.map((kw, idx) => (
-                        <Badge key={idx} className="bg-emerald-100 text-emerald-700 border-emerald-200">
-                          {kw}
-                        </Badge>
-                      ))}
-                      {aiInsights.keywords.negative?.map((kw, idx) => (
-                        <Badge key={idx} className="bg-red-100 text-red-700 border-red-200">
-                          {kw}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
-              <Input
-                placeholder="Search reviews..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 h-11"
-              />
+                </CardContent>
+              </Card>
+              <Card className="rounded-2xl border-stone-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Food</p>
+                  <p className="text-2xl font-bold text-stone-900">{stats.avgFood.toFixed(1)}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-2xl border-stone-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Service</p>
+                  <p className="text-2xl font-bold text-stone-900">{stats.avgService.toFixed(1)}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-2xl border-stone-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Ambiance</p>
+                  <p className="text-2xl font-bold text-stone-900">{stats.avgAmbiance.toFixed(1)}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-2xl border-stone-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Value</p>
+                  <p className="text-2xl font-bold text-stone-900">{stats.avgValue.toFixed(1)}</p>
+                </CardContent>
+              </Card>
             </div>
-            <Select value={sentimentFilter} onValueChange={setSentimentFilter}>
-              <SelectTrigger className="w-full sm:w-40 h-11">
-                <SelectValue placeholder="Sentiment" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Sentiment</SelectItem>
-                <SelectItem value="positive">Positive</SelectItem>
-                <SelectItem value="neutral">Neutral</SelectItem>
-                <SelectItem value="negative">Negative</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={ratingFilter} onValueChange={setRatingFilter}>
-              <SelectTrigger className="w-full sm:w-40 h-11">
-                <SelectValue placeholder="Rating" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Ratings</SelectItem>
-                <SelectItem value="5">5 Stars</SelectItem>
-                <SelectItem value="4">4+ Stars</SelectItem>
-                <SelectItem value="3">3+ Stars</SelectItem>
-                <SelectItem value="2">2+ Stars</SelectItem>
-                <SelectItem value="1">1+ Stars</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+          )}
 
-        {/* Reviews List */}
-        <div className="space-y-4">
-          {isLoading ? (
-            [...Array(5)].map((_, i) => (
-              <Skeleton key={i} className="h-40 w-full rounded-2xl" />
-            ))
-          ) : filteredReviews.length === 0 ? (
-            <Card className="rounded-2xl border-stone-200">
-              <CardContent className="py-16 text-center">
-                <MessageSquare className="w-12 h-12 text-stone-300 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-stone-900 mb-2">No reviews found</h3>
-                <p className="text-stone-500">Try adjusting your filters</p>
-              </CardContent>
-            </Card>
-          ) : (
-            filteredReviews.map((review) => {
-              const SentimentIcon = sentimentIcons[review.sentiment] || Minus;
-              return (
-                <Card key={review.id} className="rounded-2xl border-stone-200">
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-stone-100 flex items-center justify-center">
-                          <span className="font-semibold text-stone-600">
-                            {review.reviewer_name?.charAt(0)?.toUpperCase() || 'U'}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="font-medium text-stone-900">{review.reviewer_name}</p>
-                          <p className="text-sm text-stone-500">
-                            {review.created_date ? format(parseISO(review.created_date), 'MMM d, yyyy') : 'Recently'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {review.sentiment && (
-                          <Badge className={`${sentimentColors[review.sentiment]} border`}>
-                            <SentimentIcon className="w-3 h-3 mr-1" />
-                            {review.sentiment}
-                          </Badge>
-                        )}
-                        {renderStars(review.overall_rating)}
-                      </div>
+          {/* AI Insights Panel */}
+          {aiInsights && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mb-8"
+            >
+              <Card className="rounded-2xl border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-stone-900">
+                    <Sparkles className="w-5 h-5 text-amber-500" />
+                    AI-Powered Insights
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div>
+                    <h4 className="font-bold text-stone-900 mb-2">Summary</h4>
+                    <p className="text-stone-600 leading-relaxed">{aiInsights.summary}</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div>
+                      <h4 className="font-bold text-emerald-800 mb-4 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4" />
+                        Key Strengths
+                      </h4>
+                      <ul className="space-y-2.5">
+                        {aiInsights.strengths?.map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2.5 text-sm text-stone-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
+                    <div>
+                      <h4 className="font-bold text-red-800 mb-4 flex items-center gap-2">
+                        <TrendingDown className="w-4 h-4" />
+                        Areas for Improvement
+                      </h4>
+                      <ul className="space-y-2.5">
+                        {aiInsights.improvements?.map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2.5 text-sm text-stone-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
 
-                    <p className="text-stone-600 mb-4">{review.review_text}</p>
+          {/* Filters */}
+          <div className="bg-white rounded-2xl border border-stone-200 p-5 mb-8 shadow-sm">
+            <div className="flex flex-col lg:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+                <Input
+                  placeholder="Search reviews..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-11 border-stone-200 rounded-xl focus:border-amber-500 focus:ring-amber-500"
+                />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Select value={sentimentFilter} onValueChange={setSentimentFilter}>
+                  <SelectTrigger className="w-[160px] h-11 border-stone-200 rounded-xl bg-white">
+                    <SelectValue placeholder="Sentiment" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sentiments</SelectItem>
+                    <SelectItem value="positive">Positive</SelectItem>
+                    <SelectItem value="neutral">Neutral</SelectItem>
+                    <SelectItem value="negative">Negative</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={ratingFilter} onValueChange={setRatingFilter}>
+                  <SelectTrigger className="w-[160px] h-11 border-stone-200 rounded-xl bg-white">
+                    <SelectValue placeholder="Rating" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Ratings</SelectItem>
+                    <SelectItem value="5">5 Stars</SelectItem>
+                    <SelectItem value="4">4+ Stars</SelectItem>
+                    <SelectItem value="3">3+ Stars</SelectItem>
+                    <SelectItem value="2">2+ Stars</SelectItem>
+                    <SelectItem value="1">1+ Stars</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
 
-                    {review.keywords && review.keywords.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {review.keywords.map((kw, idx) => (
-                          <span key={idx} className="text-xs bg-stone-100 text-stone-600 rounded-full px-2.5 py-1">
+          {/* Reviews List */}
+          <div className="space-y-5">
+            {isLoading ? (
+              [...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-44 w-full rounded-2xl" />
+              ))
+            ) : filteredReviews.length === 0 ? (
+              <Card className="rounded-2xl border-stone-200 border-dashed">
+                <CardContent className="py-24 text-center">
+                  <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-stone-100">
+                    <MessageSquare className="w-8 h-8 text-stone-300" />
+                  </div>
+                  <h3 className="text-lg font-bold text-stone-900 mb-1">No reviews found</h3>
+                  <p className="text-stone-500">Try adjusting your filters to see more results</p>
+                </CardContent>
+              </Card>
+            ) : (
+              filteredReviews.map((review) => {
+                const SentimentIcon = sentimentIcons[review.sentiment] || Minus;
+                return (
+                  <Card key={review.id} className="rounded-2xl border-stone-200 shadow-sm hover:shadow-md transition-all group overflow-hidden">
+                    <CardContent className="p-8">
+                      <div className="flex items-start justify-between mb-6">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-stone-100 flex items-center justify-center text-stone-600 font-bold text-lg border border-stone-200 uppercase">
+                            {review.reviewer_name?.charAt(0) || 'U'}
+                          </div>
+                          <div>
+                            <p className="font-bold text-stone-900 text-lg leading-tight mb-1">{review.reviewer_name}</p>
+                            <p className="text-xs text-stone-500 flex items-center gap-1.5 font-medium">
+                              <Calendar className="w-3.5 h-3.5" />
+                              {review.created_date ? format(parseISO(review.created_date), 'MMM d, yyyy') : 'Recently'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex items-center gap-3">
+                            {review.sentiment && (
+                              <Badge className={`${sentimentColors[review.sentiment]} border text-[10px] font-bold uppercase tracking-wider shadow-sm`}>
+                                <SentimentIcon className="w-3 h-3 mr-1" />
+                                {review.sentiment}
+                              </Badge>
+                            )}
+                            {renderStars(review.overall_rating)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        <p className="text-stone-600 text-base leading-relaxed mb-6 italic">"{review.review_text}"</p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mb-6">
+                        {review.keywords?.map((kw, idx) => (
+                          <span key={idx} className="text-[10px] font-bold uppercase tracking-wider bg-stone-100 text-stone-500 rounded-lg px-2.5 py-1.5 border border-stone-200 group-hover:bg-amber-50 group-hover:text-amber-800 group-hover:border-amber-100 transition-colors">
                             {kw}
                           </span>
                         ))}
                       </div>
-                    )}
 
-                    {review.owner_response ? (
-                      <div className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-100">
-                        <p className="text-sm font-medium text-amber-800 mb-1">Your Response:</p>
-                        <p className="text-sm text-stone-600">{review.owner_response}</p>
-                      </div>
-                    ) : (
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => setSelectedReview(review)}
-                        className="mt-2"
-                      >
-                        <MessageSquare className="w-4 h-4 mr-2" />
-                        Respond
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
+                      {review.owner_response ? (
+                        <div className="p-5 bg-amber-50/50 rounded-2xl border border-amber-100/50 flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            <p className="text-xs font-bold text-amber-900 uppercase tracking-widest leading-none">Your Response</p>
+                          </div>
+                          <p className="text-sm text-stone-600 leading-relaxed font-medium italic">"{review.owner_response}"</p>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedReview(review)}
+                          className="text-amber-700 hover:text-amber-800 hover:bg-amber-50 rounded-xl px-4 py-2 font-bold text-sm"
+                        >
+                          <MessageSquare className="w-4 h-4 mr-2" />
+                          Send a Response
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
       {/* Response Dialog */}
       <Dialog open={!!selectedReview} onOpenChange={() => setSelectedReview(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl rounded-3xl p-8">
           <DialogHeader>
-            <DialogTitle>Respond to Review</DialogTitle>
+            <DialogTitle className="text-2xl font-bold font-display">Respond to Guest</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="p-4 bg-stone-50 rounded-xl">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="font-medium">{selectedReview?.reviewer_name}</span>
+          <div className="space-y-6 mt-4">
+            <div className="p-6 bg-stone-50 rounded-2xl border border-stone-100">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="font-bold text-stone-900">{selectedReview?.reviewer_name}</span>
+                <div className="w-px h-3 bg-stone-200" />
                 {renderStars(selectedReview?.overall_rating || 0)}
               </div>
-              <p className="text-sm text-stone-600">{selectedReview?.review_text}</p>
+              <p className="text-stone-600 text-sm italic leading-relaxed">"{selectedReview?.review_text}"</p>
             </div>
-            <Textarea
-              value={responseText}
-              onChange={(e) => setResponseText(e.target.value)}
-              placeholder="Write your response..."
-              className="min-h-32"
-            />
+            
+            <div className="space-y-2">
+              <p className="text-sm font-bold text-stone-900 ml-1">Your Message</p>
+              <Textarea
+                value={responseText}
+                onChange={(e) => setResponseText(e.target.value)}
+                placeholder="Ex: Thank you for the kind words! We hope to see you again soon..."
+                className="min-h-40 rounded-2xl border-stone-200 focus:border-amber-500 focus:ring-amber-500 p-4"
+              />
+            </div>
+
             <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setSelectedReview(null)}>
+              <Button variant="ghost" onClick={() => setSelectedReview(null)} className="rounded-xl px-6 font-bold">
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={handleSubmitResponse}
                 disabled={!responseText.trim() || updateReview.isPending}
-                className="bg-amber-500 hover:bg-amber-600"
+                className="bg-stone-900 hover:bg-stone-800 text-white rounded-xl px-8 font-bold shadow-lg shadow-stone-200"
               >
                 {updateReview.isPending ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
                   <Send className="w-4 h-4 mr-2" />
                 )}
-                Send Response
+                Submit Response
               </Button>
             </div>
           </div>

@@ -1,0 +1,479 @@
+{
+    "info": {
+        "name": "Restaurant API",
+        "_postman_id": "restaurant-api-v1",
+        "description": "Complete API collection for the Restaurant Review & Reservation System.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000"
+        },
+        {
+            "key": "access_token",
+            "value": ""
+        },
+        {
+            "key": "refresh_token",
+            "value": ""
+        },
+        {
+            "key": "restaurant_id",
+            "value": "1"
+        },
+        {
+            "key": "reservation_id",
+            "value": "1"
+        },
+        {
+            "key": "review_id",
+            "value": "1"
+        }
+    ],
+    "item": [
+        {
+            "name": "Auth",
+            "item": [
+                {
+                    "name": "Register User",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/auth/register/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"john@example.com\",\n  \"username\": \"johndoe\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"password\": \"SecurePass123\",\n  \"password2\": \"SecurePass123\",\n  \"role\": \"user\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Register Owner",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/auth/register/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"owner@example.com\",\n  \"username\": \"restaurantowner\",\n  \"first_name\": \"Jane\",\n  \"last_name\": \"Smith\",\n  \"password\": \"SecurePass123\",\n  \"password2\": \"SecurePass123\",\n  \"role\": \"owner\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Login",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var json = pm.response.json();",
+                                    "pm.collectionVariables.set('access_token', json.access);",
+                                    "pm.collectionVariables.set('refresh_token', json.refresh);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/auth/login/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"SecurePass123\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Refresh Token",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var json = pm.response.json();",
+                                    "pm.collectionVariables.set('access_token', json.access);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/auth/token/refresh/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Get My Profile",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/auth/me/"
+                    }
+                },
+                {
+                    "name": "Update My Profile",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/auth/me/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"first_name\": \"Johnny\",\n  \"phone\": \"+1 555-0100\"\n}"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Restaurants",
+            "item": [
+                {
+                    "name": "List All Restaurants",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/api/restaurants/"
+                    }
+                },
+                {
+                    "name": "List Restaurants (Filtered)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/restaurants/?cuisine=Italian&city=New York&ordering=-average_rating",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "restaurants",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "cuisine",
+                                    "value": "Italian"
+                                },
+                                {
+                                    "key": "city",
+                                    "value": "New York"
+                                },
+                                {
+                                    "key": "ordering",
+                                    "value": "-average_rating"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Search Restaurants",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/restaurants/?search=sushi",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "restaurants",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "search",
+                                    "value": "sushi"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Restaurant Detail",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/api/restaurants/{{restaurant_id}}/"
+                    }
+                },
+                {
+                    "name": "Create Restaurant (Owner)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var json = pm.response.json();",
+                                    "if (json.id) pm.collectionVariables.set('restaurant_id', json.id);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/restaurants/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"The Golden Fork\",\n  \"cuisine\": \"Mediterranean\",\n  \"city\": \"New York\",\n  \"address\": \"99 Harbor View Rd\",\n  \"price_range\": \"$$$\",\n  \"description\": \"Fresh Mediterranean dishes with a harbor view.\",\n  \"cover_image_url\": \"https://images.unsplash.com/photo-1544124499-58912cbddaad?auto=format&fit=crop&w=800&q=80\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Update Restaurant (Owner)",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/restaurants/{{restaurant_id}}/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"description\": \"Updated description: Award-winning Mediterranean cuisine.\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "My Restaurants (Owner)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/restaurants/my_restaurants/"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Reservations",
+            "item": [
+                {
+                    "name": "List My Reservations",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/reservations/"
+                    }
+                },
+                {
+                    "name": "Create Reservation",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var json = pm.response.json();",
+                                    "if (json.id) pm.collectionVariables.set('reservation_id', json.id);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/reservations/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"restaurant\": {{restaurant_id}},\n  \"guest_name\": \"John Doe\",\n  \"guest_email\": \"john@example.com\",\n  \"guest_phone\": \"+1 555-0100\",\n  \"date\": \"2026-04-15\",\n  \"time\": \"19:00\",\n  \"guests\": 2,\n  \"special_requests\": \"Window seat if possible\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Filter Reservations by Date",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/reservations/?date=2026-04-15",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "reservations",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "date",
+                                    "value": "2026-04-15"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Reservation Status (Owner/Admin)",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/reservations/{{reservation_id}}/update_status/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"status\": \"confirmed\"\n}"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Reviews",
+            "item": [
+                {
+                    "name": "List All Reviews",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/api/reviews/"
+                    }
+                },
+                {
+                    "name": "List Reviews for a Restaurant",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/reviews/?restaurant={{restaurant_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "reviews",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "restaurant",
+                                    "value": "{{restaurant_id}}"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Review",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var json = pm.response.json();",
+                                    "if (json.id) pm.collectionVariables.set('review_id', json.id);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": "{{base_url}}/api/reviews/",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"restaurant\": {{restaurant_id}},\n  \"reviewer_name\": \"John Doe\",\n  \"overall_rating\": 5,\n  \"food_rating\": 5,\n  \"service_rating\": 4,\n  \"ambiance_rating\": 5,\n  \"value_rating\": 4,\n  \"review_text\": \"Absolutely amazing experience! The food was fresh and the service was top-notch. Will definitely return.\"\n}"
+                        }
+                    }
+                },
+                {
+                    "name": "Get Single Review",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{base_url}}/api/reviews/{{review_id}}/"
+                    }
+                }
+            ]
+        }
+    ]
+}

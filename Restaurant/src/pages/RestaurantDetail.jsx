@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
-import { Link } from 'react-router-dom';
+import RestaurantService from '@/services/RestaurantService';
+import ReviewService from '@/services/ReviewService';
+import ReservationService from '@/services/ReservationService';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '../utils';
 import ReviewCard from '../components/restaurant/ReviewCard';
 import BookingForm from '../components/booking/BookingForm';
@@ -9,27 +11,31 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from '@/lib/AuthContext';
+import { useToast } from "@/components/ui/use-toast";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { 
-  Star, 
-  MapPin, 
-  Phone, 
-  Globe, 
-  Clock, 
-  Wifi, 
-  ParkingCircle, 
-  Music, 
+import {
+  Star,
+  MapPin,
+  Phone,
+  Globe,
+  Clock,
+  Wifi,
+  ParkingCircle,
+  Music,
   ChevronLeft,
   ChevronRight,
   CalendarPlus,
   CheckCircle,
   X,
-  UtensilsCrossed
+  UtensilsCrossed,
+  Shield,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -42,44 +48,46 @@ const featureIcons = {
 
 export default function RestaurantDetail() {
   const urlParams = new URLSearchParams(window.location.search);
-  const slug = urlParams.get('slug');
+  const id = urlParams.get('id');
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
-  const [user, setUser] = useState(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showBookingDialog, setShowBookingDialog] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const auth = await base44.auth.isAuthenticated();
-      setIsAuthenticated(auth);
-      if (auth) {
-        const userData = await base44.auth.me();
-        setUser(userData);
-      }
-    };
-    checkAuth();
-  }, []);
-
-  const { data: restaurants = [], isLoading: restaurantLoading } = useQuery({
-    queryKey: ['restaurant', slug],
-    queryFn: () => base44.entities.Restaurant.filter({ slug }),
-    enabled: !!slug,
+  // Fetch Restaurant Details
+  const { data: restaurant, isLoading: restaurantLoading } = useQuery({
+    queryKey: ['restaurant', id],
+    queryFn: () => RestaurantService.getRestaurant(id),
+    enabled: !!id,
   });
 
-  const restaurant = restaurants[0];
-
+  // Fetch Reviews
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
-    queryKey: ['reviews', restaurant?.id],
-    queryFn: () => base44.entities.Review.filter({ restaurant_id: restaurant.id }, '-created_date'),
-    enabled: !!restaurant?.id,
+    queryKey: ['reviews', id],
+    queryFn: () => ReviewService.getReviews({ restaurant: id }),
+    enabled: !!id,
+  });
+
+  // Verification Mutation
+  const verifyMutation = useMutation({
+    mutationFn: () => RestaurantService.verifyRestaurant(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurant', id] });
+      toast({
+        title: "Restaurant Verified",
+        description: "The restaurant has been successfully verified and is now live.",
+      });
+    },
   });
 
   const createReservation = useMutation({
-    mutationFn: (data) => base44.entities.Reservation.create(data),
+    mutationFn: (data) => ReservationService.createReservation(data),
     onSuccess: () => {
       setBookingSuccess(true);
       setTimeout(() => {
@@ -90,11 +98,14 @@ export default function RestaurantDetail() {
   });
 
   const handleBooking = async (bookingData) => {
-    if (!isAuthenticated) {
-      base44.auth.redirectToLogin(window.location.href);
+    if (!user) {
+      navigate('/Login');
       return;
     }
-    createReservation.mutate(bookingData);
+    createReservation.mutate({
+      ...bookingData,
+      restaurant: id
+    });
   };
 
   if (restaurantLoading) {
@@ -129,12 +140,36 @@ export default function RestaurantDetail() {
     );
   }
 
-  const gallery = restaurant.gallery?.length > 0 
-    ? restaurant.gallery 
-    : [restaurant.cover_image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&q=80'];
+  const gallery = restaurant.gallery?.length > 0
+    ? restaurant.gallery.map(item => item.image_source)
+    : [restaurant.cover_image_source || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&q=80'];
 
   return (
     <div className="min-h-screen bg-stone-50">
+      {/* Admin Verification Bar */}
+      {isAdmin && !restaurant.is_verified && (
+        <div className="bg-amber-600 text-white py-3 px-4 sticky top-0 z-50 shadow-md">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Shield className="w-5 h-5" />
+              <div>
+                <span className="font-semibold">Verification Pending</span>
+                <p className="text-xs text-amber-100 hidden sm:block">Please review restaurant details and verify if accurate.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => verifyMutation.mutate()}
+                disabled={verifyMutation.isPending}
+                className="bg-white text-amber-700 hover:bg-amber-50 h-9 rounded-full px-6 font-semibold"
+              >
+                {verifyMutation.isPending ? 'Verifying...' : 'Approve & Verify'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero Gallery */}
       <section className="relative h-[50vh] lg:h-[60vh] bg-stone-900">
         <AnimatePresence mode="wait">
@@ -147,6 +182,9 @@ export default function RestaurantDetail() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
             className="absolute inset-0 w-full h-full object-cover"
+            onError={(e) => {
+              e.target.src = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80';
+            }}
           />
         </AnimatePresence>
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
@@ -166,16 +204,15 @@ export default function RestaurantDetail() {
             >
               <ChevronRight className="w-5 h-5" />
             </button>
-            
+
             {/* Dots */}
             <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-2">
               {gallery.map((_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setCurrentImageIndex(idx)}
-                  className={`w-2 h-2 rounded-full transition-colors ${
-                    idx === currentImageIndex ? 'bg-white' : 'bg-white/50'
-                  }`}
+                  className={`w-2 h-2 rounded-full transition-colors ${idx === currentImageIndex ? 'bg-white' : 'bg-white/50'
+                    }`}
                 />
               ))}
             </div>
@@ -199,11 +236,11 @@ export default function RestaurantDetail() {
                 </Badge>
               )}
             </div>
-            
+
             <h1 className="font-display text-3xl lg:text-5xl font-bold text-white mb-3">
               {restaurant.name}
             </h1>
-            
+
             <div className="flex flex-wrap items-center gap-4 text-white/90">
               <div className="flex items-center gap-2">
                 <MapPin className="w-4 h-4" />
@@ -212,7 +249,7 @@ export default function RestaurantDetail() {
               {restaurant.average_rating > 0 && (
                 <div className="flex items-center gap-1.5">
                   <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
-                  <span className="font-semibold">{restaurant.average_rating?.toFixed(1)}</span>
+                  <span className="font-semibold">{Number(restaurant.average_rating || 0).toFixed(1)}</span>
                   <span className="text-white/70">({restaurant.total_reviews} reviews)</span>
                 </div>
               )}
@@ -251,7 +288,7 @@ export default function RestaurantDetail() {
                 <h3 className="font-display text-xl font-bold text-stone-900 mb-4">Amenities</h3>
                 <div className="flex flex-wrap gap-3">
                   {restaurant.features.map((feature, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       className="flex items-center gap-2 bg-white border border-stone-200 rounded-full px-4 py-2"
                     >
@@ -317,8 +354,8 @@ export default function RestaurantDetail() {
                       onClick={() => setCurrentImageIndex(idx)}
                       className="aspect-square rounded-xl overflow-hidden hover:opacity-90 transition-opacity"
                     >
-                      <img 
-                        src={img} 
+                      <img
+                        src={img}
                         alt={`${restaurant.name} photo ${idx + 1}`}
                         className="w-full h-full object-cover"
                       />
@@ -351,14 +388,38 @@ export default function RestaurantDetail() {
                   {restaurant.website && (
                     <div className="flex items-center gap-3 text-sm">
                       <Globe className="w-4 h-4 text-stone-400" />
-                      <a 
-                        href={restaurant.website} 
-                        target="_blank" 
+                      <a
+                        href={restaurant.website}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-amber-600 hover:underline"
                       >
                         Visit Website
                       </a>
+                    </div>
+                  )}
+
+                  {isAdmin && (
+                    <div className="mt-6 pt-6 border-t border-stone-100 space-y-4">
+                      <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider">Owner Contact</h4>
+                      <div className="bg-stone-50 rounded-xl p-4 space-y-3">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-stone-500">Email Address</span>
+                          <span className="text-sm font-medium text-stone-900">{restaurant.owner_email || 'Not provided'}</span>
+                        </div>
+                        {restaurant.phone && (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-stone-500">Business Phone</span>
+                            <span className="text-sm font-medium text-stone-900">{restaurant.phone}</span>
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-stone-500">Member Since</span>
+                          <span className="text-sm font-medium text-stone-900">
+                            {restaurant.created_date ? new Date(restaurant.created_date).toLocaleDateString() : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -396,12 +457,12 @@ export default function RestaurantDetail() {
                   Reserve at {restaurant.name}
                 </DialogTitle>
               </DialogHeader>
-              
-              {!isAuthenticated ? (
+
+              {!user ? (
                 <div className="text-center py-8">
                   <p className="text-stone-500 mb-6">Please sign in to make a reservation</p>
-                  <Button 
-                    onClick={() => base44.auth.redirectToLogin(window.location.href)}
+                  <Button
+                    onClick={() => navigate('/Login')}
                     className="bg-amber-500 hover:bg-amber-600"
                   >
                     Sign In to Continue

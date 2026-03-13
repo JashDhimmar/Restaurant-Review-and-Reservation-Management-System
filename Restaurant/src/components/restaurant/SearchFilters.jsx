@@ -1,12 +1,12 @@
 import React from 'react';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from "@/components/ui/select";
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import {
@@ -19,16 +19,16 @@ import {
 
 const cuisines = [
   { value: 'all', label: 'All Cuisines' },
-  { value: 'italian', label: '🍝 Italian' },
-  { value: 'japanese', label: '🍣 Japanese' },
-  { value: 'mexican', label: '🌮 Mexican' },
-  { value: 'indian', label: '🍛 Indian' },
-  { value: 'chinese', label: '🥢 Chinese' },
-  { value: 'french', label: '🥐 French' },
-  { value: 'american', label: '🍔 American' },
-  { value: 'mediterranean', label: '🫒 Mediterranean' },
-  { value: 'thai', label: '🍜 Thai' },
-  { value: 'korean', label: '🥘 Korean' },
+  { value: 'Italian', label: '🍝 Italian' },
+  { value: 'Japanese', label: '🍣 Japanese' },
+  { value: 'Mexican', label: '🌮 Mexican' },
+  { value: 'Indian', label: '🍛 Indian' },
+  { value: 'Chinese', label: '🥢 Chinese' },
+  { value: 'French', label: '🥐 French' },
+  { value: 'American', label: '🍔 American' },
+  { value: 'Mediterranean', label: '🫒 Mediterranean' },
+  { value: 'Thai', label: '🍜 Thai' },
+  { value: 'Korean', label: '🥘 Korean' },
 ];
 
 const priceRanges = [
@@ -46,7 +46,14 @@ const ratings = [
   { value: '3.5', label: '3.5+ ⭐' },
 ];
 
-export default function SearchFilters({ filters, onFilterChange, onSearch }) {
+export default function SearchFilters({ filters, onFilterChange, className }) {
+  console.log('SearchFilters rendering with:', filters);
+
+  const handleFilterChange = (key, value) => {
+    console.log(`Filter changing: ${key} = ${value}`);
+    onFilterChange({ ...filters, [key]: value });
+  };
+
   const activeFiltersCount = [
     filters.cuisine !== 'all' && filters.cuisine,
     filters.price_range !== 'all' && filters.price_range,
@@ -67,8 +74,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
       {/* Cuisine */}
       <div>
         <label className="block text-sm font-medium text-stone-700 mb-2">Cuisine Type</label>
-        <Select 
-          value={filters.cuisine} 
+        <Select
+          value={filters.cuisine}
           onValueChange={(value) => onFilterChange({ ...filters, cuisine: value })}
         >
           <SelectTrigger className="w-full bg-white">
@@ -85,8 +92,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
       {/* Price Range */}
       <div>
         <label className="block text-sm font-medium text-stone-700 mb-2">Price Range</label>
-        <Select 
-          value={filters.price_range} 
+        <Select
+          value={filters.price_range}
           onValueChange={(value) => onFilterChange({ ...filters, price_range: value })}
         >
           <SelectTrigger className="w-full bg-white">
@@ -103,8 +110,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
       {/* Rating */}
       <div>
         <label className="block text-sm font-medium text-stone-700 mb-2">Minimum Rating</label>
-        <Select 
-          value={filters.rating} 
+        <Select
+          value={filters.rating}
           onValueChange={(value) => onFilterChange({ ...filters, rating: value })}
         >
           <SelectTrigger className="w-full bg-white">
@@ -119,8 +126,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
       </div>
 
       {activeFiltersCount > 0 && (
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           onClick={clearFilters}
           className="w-full text-stone-500 hover:text-stone-700"
         >
@@ -145,13 +152,13 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
             className="pl-12 h-12 bg-white border-stone-200 rounded-xl text-base focus-visible:ring-amber-500"
           />
         </div>
-        
+
         {/* Mobile Filter Button */}
         <Sheet>
           <SheetTrigger asChild>
-            <Button 
-              variant="outline" 
-              size="icon" 
+            <Button
+              variant="outline"
+              size="icon"
               className="h-12 w-12 md:hidden rounded-xl border-stone-200 relative"
             >
               <SlidersHorizontal className="w-5 h-5" />
@@ -173,8 +180,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
 
       {/* Desktop Filters */}
       <div className="hidden md:flex items-center gap-3">
-        <Select 
-          value={filters.cuisine} 
+        <Select
+          value={filters.cuisine}
           onValueChange={(value) => onFilterChange({ ...filters, cuisine: value })}
         >
           <SelectTrigger className="w-44 bg-white border-stone-200 rounded-xl">
@@ -187,8 +194,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
           </SelectContent>
         </Select>
 
-        <Select 
-          value={filters.price_range} 
+        <Select
+          value={filters.price_range}
           onValueChange={(value) => onFilterChange({ ...filters, price_range: value })}
         >
           <SelectTrigger className="w-40 bg-white border-stone-200 rounded-xl">
@@ -201,8 +208,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
           </SelectContent>
         </Select>
 
-        <Select 
-          value={filters.rating} 
+        <Select
+          value={filters.rating}
           onValueChange={(value) => onFilterChange({ ...filters, rating: value })}
         >
           <SelectTrigger className="w-36 bg-white border-stone-200 rounded-xl">
@@ -216,8 +223,8 @@ export default function SearchFilters({ filters, onFilterChange, onSearch }) {
         </Select>
 
         {activeFiltersCount > 0 && (
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="sm"
             onClick={clearFilters}
             className="text-stone-500 hover:text-stone-700"

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
+import ReservationService from '@/services/ReservationService';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '../utils';
 import { Button } from "@/components/ui/button";
@@ -17,10 +18,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Calendar, 
-  Clock, 
-  Users, 
+import {
+  Calendar,
+  Clock,
+  Users,
   MapPin,
   Star,
   X,
@@ -48,31 +49,20 @@ const statusLabels = {
 };
 
 export default function MyReservations() {
-  const [user, setUser] = useState(null);
+  const { user } = useAuth();
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState(null);
 
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const isAuth = await base44.auth.isAuthenticated();
-      if (isAuth) {
-        const userData = await base44.auth.me();
-        setUser(userData);
-      }
-    };
-    loadUser();
-  }, []);
-
   const { data: reservations = [], isLoading } = useQuery({
     queryKey: ['my-reservations', user?.email],
-    queryFn: () => base44.entities.Reservation.filter({ customer_email: user.email }, '-date'),
+    queryFn: () => ReservationService.getReservations(),
     enabled: !!user?.email,
   });
 
   const cancelReservation = useMutation({
-    mutationFn: (id) => base44.entities.Reservation.update(id, { status: 'cancelled' }),
+    mutationFn: (id) => ReservationService.updateStatus(id, 'cancelled'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['my-reservations'] });
       setCancelDialogOpen(false);
@@ -94,6 +84,14 @@ export default function MyReservations() {
     const resDate = parseISO(r.date);
     return (isPast(resDate) && !isToday(resDate)) || ['cancelled', 'completed', 'no_show'].includes(r.status);
   });
+
+  const getTimeLabel = (timeStr) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    const d = new Date();
+    d.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0);
+    return format(d, 'h:mm a');
+  };
 
   const ReservationCard = ({ reservation, isPast: isPastReservation }) => {
     const canCancel = !isPastReservation && !['cancelled', 'completed', 'no_show'].includes(reservation.status);
@@ -139,14 +137,14 @@ export default function MyReservations() {
               <p className="text-stone-500 mb-1">Time</p>
               <p className="font-medium text-stone-900 flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-500" />
-                {reservation.time}
+                {getTimeLabel(reservation.time)}
               </p>
             </div>
             <div>
               <p className="text-stone-500 mb-1">Guests</p>
               <p className="font-medium text-stone-900 flex items-center gap-1.5">
                 <Users className="w-4 h-4 text-amber-500" />
-                {reservation.party_size} {reservation.party_size === 1 ? 'Guest' : 'Guests'}
+                {reservation.guests} {reservation.guests === 1 ? 'Guest' : 'Guests'}
               </p>
             </div>
             <div className="flex items-end">
@@ -158,7 +156,7 @@ export default function MyReservations() {
                   </Button>
                 </Link>
               ) : (
-                <Link to={createPageUrl(`RestaurantDetail?slug=${reservation.restaurant_id}`)}>
+                <Link to={createPageUrl(`RestaurantDetail?id=${reservation.restaurant}`)}>
                   <Button variant="ghost" size="sm" className="gap-1.5 text-stone-500">
                     View Restaurant
                     <ChevronRight className="w-4 h-4" />
@@ -187,8 +185,8 @@ export default function MyReservations() {
           <Calendar className="w-16 h-16 text-stone-300 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-stone-900 mb-2">Sign in to view your reservations</h2>
           <p className="text-stone-500 mb-6">Keep track of your upcoming and past bookings</p>
-          <Button 
-            onClick={() => base44.auth.redirectToLogin(window.location.href)}
+          <Button
+            onClick={() => mockApi.auth.redirectToLogin()}
             className="bg-amber-500 hover:bg-amber-600"
           >
             Sign In
@@ -216,15 +214,15 @@ export default function MyReservations() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="upcoming" className="w-full">
           <TabsList className="w-full justify-start mb-8 bg-stone-100 rounded-xl p-1.5 h-auto">
-            <TabsTrigger 
-              value="upcoming" 
+            <TabsTrigger
+              value="upcoming"
               className="rounded-lg py-3 px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm"
             >
               <CalendarDays className="w-4 h-4 mr-2" />
               Upcoming ({upcomingReservations.length})
             </TabsTrigger>
-            <TabsTrigger 
-              value="past" 
+            <TabsTrigger
+              value="past"
               className="rounded-lg py-3 px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm"
             >
               <History className="w-4 h-4 mr-2" />
@@ -285,7 +283,7 @@ export default function MyReservations() {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel Reservation?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to cancel your reservation at {selectedReservation?.restaurant_name}? 
+              Are you sure you want to cancel your reservation at {selectedReservation?.restaurant_name}?
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

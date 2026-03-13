@@ -1,62 +1,93 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { createPageUrl } from './utils';
-import { base44 } from '@/api/base44Client';
+import AuthService from '@/services/AuthService';
+import RestaurantService from '@/services/RestaurantService';
 import { Button } from "@/components/ui/button";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger 
+  DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import { 
-  Search, 
-  User, 
-  Calendar, 
-  LogOut, 
-  Settings, 
+import {
+  Search,
+  User,
+  Calendar,
+  LogOut,
+  Settings,
   ChefHat,
   Menu,
   X,
   Star,
-  Building2
+  Building2,
+  ChevronDown
 } from 'lucide-react';
 
 export default function Layout({ children, currentPageName }) {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [restaurantName, setRestaurantName] = useState('');
+  const location = useLocation();
 
   useEffect(() => {
+    let active = true;
     const checkAuth = async () => {
-      const authenticated = await base44.auth.isAuthenticated();
+      const authenticated = AuthService.isAuthenticated();
       setIsAuthenticated(authenticated);
       if (authenticated) {
-        const userData = await base44.auth.me();
-        setUser(userData);
+        try {
+          const localUser = AuthService.getUser();
+          let currentUser = localUser;
+          if (!localUser) {
+            currentUser = await AuthService.me();
+          }
+          if (active) setUser(currentUser);
+
+          // If the user is an owner, try to fetch their restaurant
+          if (currentUser?.role === 'owner') {
+            try {
+              const restaurants = await RestaurantService.getMyRestaurants();
+              if (active && restaurants && restaurants.length > 0) {
+                setRestaurantName(restaurants[0].name);
+              }
+            } catch (err) {
+              console.error("Failed to fetch owner restaurant", err);
+            }
+          }
+        } catch (err) {
+          console.error("Auth check failed", err);
+          if (active) {
+            setIsAuthenticated(false);
+            AuthService.logout();
+          }
+        }
       }
     };
     checkAuth();
-  }, []);
+    return () => { active = false; };
+  }, [location.pathname]);
 
   const handleLogout = () => {
-    base44.auth.logout();
+    AuthService.logout();
+    window.location.href = '/';
   };
 
   const handleLogin = () => {
-    base44.auth.redirectToLogin(window.location.href);
+    window.location.href = '/Login';
   };
 
   // Check if user is a restaurant owner
-  const isOwner = user?.is_owner === true;
+  const isOwner = user?.role === 'owner' || user?.role === 'admin';
   const isAdmin = user?.role === 'admin';
 
   // Hide layout on certain pages
-  const hideLayout = ['Login', 'Register'].includes(currentPageName);
-  
+  const hideLayout = ['Login', 'Register', 'PartnerWithUs'].includes(currentPageName);
+
   if (hideLayout) {
-    return <>{children}</>;
+    return <div className="bg-stone-50 min-h-screen">{children}</div>;
   }
 
   return (
@@ -81,132 +112,128 @@ export default function Layout({ children, currentPageName }) {
         }
       `}</style>
 
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-stone-200/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 lg:h-20">
-            {/* Logo */}
-            <Link to={createPageUrl('Home')} className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center">
-                <ChefHat className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-display font-bold text-xl text-stone-900 hidden sm:block">
-                TableTaste
-              </span>
-            </Link>
-
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center gap-8">
-              <Link 
-                to={createPageUrl('Home')} 
-                className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
+      <header className={`sticky top-0 z-50 bg-white border-b border-stone-200 ${isAdmin ? '' : 'backdrop-blur-xl bg-white/80'}`}>
+        <div className="w-full">
+          <div className={`flex items-center h-16 lg:h-20 ${isOwner ? 'px-0' : 'px-4 sm:px-6 lg:px-8'}`}>
+            {/* Logo Area - Matches Sidebar Width */}
+            <div className={`flex items-center h-full ${isOwner ? 'w-64 border-r border-stone-200 px-6 shrink-0' : ''}`}>
+              <Link
+                to={user?.role === 'admin' ? createPageUrl('AdminDashboard') : user?.role === 'owner' ? createPageUrl('OwnerDashboard') : createPageUrl('Home')}
+                className="flex items-center gap-2"
               >
-                Discover
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center">
+                  <ChefHat className="w-5 h-5 text-white" />
+                </div>
+                <span className="font-display font-bold text-xl text-stone-900 hidden sm:block">
+                  TableTaste
+                </span>
               </Link>
-              {isAuthenticated && (
-                <Link 
-                  to={createPageUrl('MyReservations')} 
-                  className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
-                >
-                  My Reservations
-                </Link>
-              )}
-              {isOwner && (
-                <Link 
-                  to={createPageUrl('OwnerDashboard')} 
-                  className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
-                >
-                  Dashboard
-                </Link>
-              )}
-              {isAdmin && (
-                <Link 
-                  to={createPageUrl('AdminDashboard')} 
-                  className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
-                >
-                  Admin
-                </Link>
-              )}
-            </nav>
+            </div>
 
-            {/* Right Section */}
-            <div className="flex items-center gap-3">
-              {isAuthenticated ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="flex items-center gap-2 h-10 px-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center">
-                        <User className="w-4 h-4 text-amber-700" />
-                      </div>
-                      <span className="hidden sm:block text-sm font-medium text-stone-700">
-                        {user?.full_name?.split(' ')[0] || 'Account'}
-                      </span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <div className="px-3 py-2 border-b border-stone-100">
-                      <p className="text-sm font-medium text-stone-900">{user?.full_name}</p>
-                      <p className="text-xs text-stone-500">{user?.email}</p>
-                    </div>
-                    <DropdownMenuItem asChild>
-                      <Link to={createPageUrl('Profile')} className="flex items-center gap-2">
-                        <Settings className="w-4 h-4" />
-                        Profile Settings
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link to={createPageUrl('MyReservations')} className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4" />
-                        My Reservations
-                      </Link>
-                    </DropdownMenuItem>
-                    {isOwner && (
-                      <>
-                        <DropdownMenuSeparator />
+            {/* Admin Dashboard Title & Desktop Navigation */}
+            <div className={`flex-1 flex items-center ${isOwner ? 'px-6' : 'px-4 sm:px-6 lg:px-8'}`}>
+              {isOwner && restaurantName && (
+                <div className="hidden sm:flex flex-col">
+                  <span className="font-medium text-stone-800 tracking-tight leading-none">
+                    {restaurantName}
+                  </span>
+                  <span className="text-[10px] text-stone-500 mt-1">
+                    Manage your restaurant and reservations
+                  </span>
+                </div>
+              )}
+
+              <nav className={`hidden md:flex items-center gap-8 ${isAdmin ? 'ml-auto' : ''}`}>
+                {(!isAuthenticated || user?.role === 'user') && (
+                  <Link
+                    to={createPageUrl('Home')}
+                    className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
+                  >
+                    Discover
+                  </Link>
+                )}
+                {isAuthenticated && user?.role === 'user' && (
+                  <Link
+                    to={createPageUrl('MyReservations')}
+                    className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
+                  >
+                    My Reservations
+                  </Link>
+                )}
+              </nav>
+
+              {/* Right Section */}
+              <div className="flex items-center gap-3 ml-auto">
+                {isAuthenticated ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" className="flex items-center gap-2 h-auto py-1.5 px-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center">
+                          {user?.full_name ? (
+                            <span className="text-sm font-bold text-amber-800">
+                              {user.full_name.charAt(0).toUpperCase()}
+                            </span>
+                          ) : (
+                            <User className="w-4 h-4 text-amber-700" />
+                          )}
+                        </div>
+                        <div className="hidden sm:flex items-center gap-2">
+                          <div className="flex flex-col items-start leading-none gap-1">
+                            <span className="text-sm font-medium text-stone-700">
+                              {user?.full_name?.split(' ')[0] || 'Account'}
+                            </span>
+                            {user?.role && (
+                              <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                                {user.role}
+                              </span>
+                            )}
+                          </div>
+                          <ChevronDown className="w-4 h-4 text-stone-400" />
+                        </div>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem asChild>
+                        <Link to={createPageUrl('Profile')} className="flex items-center gap-2">
+                          <Settings className="w-4 h-4" />
+                          Profile Settings
+                        </Link>
+                      </DropdownMenuItem>
+                      {user?.role === 'user' && (
                         <DropdownMenuItem asChild>
-                          <Link to={createPageUrl('OwnerDashboard')} className="flex items-center gap-2">
-                            <Building2 className="w-4 h-4" />
-                            Owner Dashboard
+                          <Link to={createPageUrl('MyReservations')} className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4" />
+                            My Reservations
                           </Link>
                         </DropdownMenuItem>
-                      </>
-                    )}
-                    {isAdmin && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem asChild>
-                          <Link to={createPageUrl('AdminDashboard')} className="flex items-center gap-2">
-                            <Star className="w-4 h-4" />
-                            Admin Panel
-                          </Link>
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-                      <LogOut className="w-4 h-4 mr-2" />
-                      Sign Out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <Button 
-                  onClick={handleLogin}
-                  className="bg-stone-900 hover:bg-stone-800 text-white rounded-full px-6"
+                      )}
+
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Sign Out
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Button
+                    onClick={handleLogin}
+                    className="bg-stone-900 hover:bg-stone-800 text-white rounded-full px-6"
+                  >
+                    Sign In
+                  </Button>
+                )}
+
+                {/* Mobile Menu Toggle */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden"
+                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 >
-                  Sign In
+                  {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
                 </Button>
-              )}
-
-              {/* Mobile Menu Toggle */}
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="md:hidden"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              >
-                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -215,29 +242,40 @@ export default function Layout({ children, currentPageName }) {
         {mobileMenuOpen && (
           <div className="md:hidden bg-white border-t border-stone-100">
             <nav className="px-4 py-4 space-y-1">
-              <Link 
-                to={createPageUrl('Home')} 
-                className="block px-4 py-3 rounded-lg text-stone-700 hover:bg-stone-50"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Discover Restaurants
-              </Link>
-              {isAuthenticated && (
-                <Link 
-                  to={createPageUrl('MyReservations')} 
+              {(!isAuthenticated || user?.role === 'user') && (
+                <Link
+                  to={createPageUrl('Home')}
+                  className="block px-4 py-3 rounded-lg text-stone-700 hover:bg-stone-50"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Discover Restaurants
+                </Link>
+              )}
+              {isAuthenticated && user?.role === 'user' && (
+                <Link
+                  to={createPageUrl('MyReservations')}
                   className="block px-4 py-3 rounded-lg text-stone-700 hover:bg-stone-50"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   My Reservations
                 </Link>
               )}
-              {isOwner && (
-                <Link 
-                  to={createPageUrl('OwnerDashboard')} 
+              {isAuthenticated && user?.role === 'owner' && (
+                <Link
+                  to={createPageUrl('OwnerDashboard')}
                   className="block px-4 py-3 rounded-lg text-stone-700 hover:bg-stone-50"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Owner Dashboard
+                </Link>
+              )}
+              {isAuthenticated && user?.role === 'admin' && (
+                <Link
+                  to={createPageUrl('AdminDashboard')}
+                  className="block px-4 py-3 rounded-lg text-stone-700 hover:bg-stone-50"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Admin Panel
                 </Link>
               )}
             </nav>

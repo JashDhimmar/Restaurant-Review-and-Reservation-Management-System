@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import RestaurantService from '@/services/RestaurantService';
+import ReviewService from '@/services/ReviewService';
+import ReservationService from '@/services/ReservationService';
+import AuthService from '@/services/AuthService';
+import { useAuth } from '@/lib/AuthContext';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -27,7 +32,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { 
+import {
   Building2,
   Users,
   Star,
@@ -39,103 +44,130 @@ import {
   Shield,
   Flag,
   Eye,
-  TrendingUp
+  TrendingUp,
+  Trash2,
+  AlertCircle
 } from 'lucide-react';
 import { format, parseISO, subDays } from 'date-fns';
 import { motion } from 'framer-motion';
+import { useToast } from "@/components/ui/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+} from 'recharts';
 
 export default function AdminDashboard() {
-  const [user, setUser] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  const queryClient = useQueryClient();
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const isAuth = await base44.auth.isAuthenticated();
-      if (isAuth) {
-        const userData = await base44.auth.me();
-        setUser(userData);
-      }
-    };
-    loadUser();
-  }, []);
-
-  // Fetch all data
-  const { data: restaurants = [], isLoading: restaurantsLoading } = useQuery({
-    queryKey: ['admin-restaurants'],
-    queryFn: () => base44.entities.Restaurant.list('-created_date'),
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('adminDashboardActiveTab') || 'overview';
   });
 
-  const { data: users = [], isLoading: usersLoading } = useQuery({
-    queryKey: ['admin-users'],
-    queryFn: () => base44.entities.User.list('-created_date'),
+  useEffect(() => {
+    localStorage.setItem('adminDashboardActiveTab', activeTab);
+  }, [activeTab]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deleteType, setDeleteType] = useState(null); // 'customer', 'owner', 'review'
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+
+  const { toast } = useToast();
+
+  const queryClient = useQueryClient();
+
+  // Fetch Stats (Always loaded for Overview & Badges)
+  const { data: dashboardStats, isLoading: statsLoading } = useQuery({
+    queryKey: ['admin-stats'],
+    queryFn: () => RestaurantService.getAdminStats(),
+  });
+
+  // Fetch all data (Lazy loaded based on active tab)
+  const { data: restaurants = [], isLoading: restaurantsLoading } = useQuery({
+    queryKey: ['admin-restaurants'],
+    queryFn: () => RestaurantService.getRestaurants(),
+    enabled: activeTab === 'restaurants',
+  });
+
+  const { data: customers = [], isLoading: customersLoading } = useQuery({
+    queryKey: ['admin-customers'],
+    queryFn: () => AuthService.getCustomers(),
+    enabled: activeTab === 'customers',
+  });
+
+  const { data: owners = [], isLoading: ownersLoading } = useQuery({
+    queryKey: ['admin-owners'],
+    queryFn: () => AuthService.getOwners(),
+    enabled: activeTab === 'owners',
   });
 
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
     queryKey: ['admin-reviews'],
-    queryFn: () => base44.entities.Review.list('-created_date'),
-  });
-
-  const { data: reservations = [] } = useQuery({
-    queryKey: ['admin-reservations'],
-    queryFn: () => base44.entities.Reservation.list('-created_date', 100),
+    queryFn: () => ReviewService.getReviews(),
+    enabled: activeTab === 'reviews',
   });
 
   // Mutations
-  const verifyRestaurant = useMutation({
-    mutationFn: ({ id, verified }) => base44.entities.Restaurant.update(id, { is_verified: verified }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-restaurants'] }),
-  });
 
   const flagReview = useMutation({
-    mutationFn: ({ id, flagged }) => base44.entities.Review.update(id, { is_flagged: flagged }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-reviews'] }),
+    mutationFn: ({ id, flagged }) => ReviewService.updateReview(id, { is_flagged: flagged }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-reviews'] });
+      toast({
+        title: variables.flagged ? "Review Flagged" : "Review Unflagged",
+        description: `The review has been ${variables.flagged ? 'flagged' : 'unflagged'} successfully.`,
+      });
+    },
   });
 
   const deleteReview = useMutation({
-    mutationFn: (id) => base44.entities.Review.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-reviews'] }),
+    mutationFn: (id) => ReviewService.deleteReview(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-reviews'] });
+      toast({
+        title: "Review Deleted",
+        description: "The review has been removed successfully.",
+      });
+    },
   });
 
-  // Stats
-  const stats = useMemo(() => {
-    const today = new Date();
-    const weekAgo = subDays(today, 7);
-    
-    const newRestaurants = restaurants.filter(r => 
-      r.created_date && parseISO(r.created_date) >= weekAgo
-    ).length;
-    
-    const newUsers = users.filter(u => 
-      u.created_date && parseISO(u.created_date) >= weekAgo
-    ).length;
-    
-    const newReservations = reservations.filter(r => 
-      r.created_date && parseISO(r.created_date) >= weekAgo
-    ).length;
-
-    const pendingVerification = restaurants.filter(r => !r.is_verified).length;
-    const flaggedReviews = reviews.filter(r => r.is_flagged).length;
-
-    return {
-      totalRestaurants: restaurants.length,
-      totalUsers: users.length,
-      totalReviews: reviews.length,
-      totalReservations: reservations.length,
-      newRestaurants,
-      newUsers,
-      newReservations,
-      pendingVerification,
-      flaggedReviews
-    };
-  }, [restaurants, users, reviews, reservations]);
+  const deleteUserMutation = useMutation({
+    mutationFn: (id) => AuthService.deleteUser(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-customers'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-owners'] });
+      toast({
+        title: `${deleteType === 'owner' ? 'Owner' : 'Customer'} Deleted`,
+        description: `The ${deleteType === 'owner' ? 'owner' : 'customer'} has been removed successfully.`,
+      });
+    },
+  });
 
   // Filtered data
   const filteredRestaurants = useMemo(() => {
     if (!searchQuery) return restaurants;
     const search = searchQuery.toLowerCase();
-    return restaurants.filter(r => 
+    return restaurants.filter(r =>
       r.name?.toLowerCase().includes(search) ||
       r.city?.toLowerCase().includes(search)
     );
@@ -144,11 +176,29 @@ export default function AdminDashboard() {
   const filteredReviews = useMemo(() => {
     if (!searchQuery) return reviews;
     const search = searchQuery.toLowerCase();
-    return reviews.filter(r => 
+    return reviews.filter(r =>
       r.review_text?.toLowerCase().includes(search) ||
       r.reviewer_name?.toLowerCase().includes(search)
     );
   }, [reviews, searchQuery]);
+
+  const filteredCustomers = useMemo(() => {
+    if (!searchQuery) return customers;
+    const search = searchQuery.toLowerCase();
+    return customers.filter(u =>
+      u.full_name?.toLowerCase().includes(search) ||
+      u.email?.toLowerCase().includes(search)
+    );
+  }, [customers, searchQuery]);
+
+  const filteredOwners = useMemo(() => {
+    if (!searchQuery) return owners;
+    const search = searchQuery.toLowerCase();
+    return owners.filter(u =>
+      u.full_name?.toLowerCase().includes(search) ||
+      u.email?.toLowerCase().includes(search)
+    );
+  }, [owners, searchQuery]);
 
   if (user?.role !== 'admin') {
     return (
@@ -162,184 +212,465 @@ export default function AdminDashboard() {
     );
   }
 
+  const navItems = [
+    { id: 'overview', label: 'Overview', icon: TrendingUp },
+    { id: 'restaurants', label: 'Restaurants', icon: Building2, badge: dashboardStats?.pendingVerification },
+    { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'owners', label: 'Owners', icon: Shield },
+    { id: 'reviews', label: 'Reviews', icon: Star, badge: dashboardStats?.flaggedReviews },
+  ];
+
   return (
-    <div className="min-h-screen bg-stone-50">
-      {/* Header */}
-      <div className="bg-white border-b border-stone-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-stone-900 flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="font-display text-2xl font-bold text-stone-900">Admin Dashboard</h1>
-              <p className="text-stone-500">Platform overview and management</p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-stone-50 flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white border-r border-stone-200 hidden md:flex flex-col">
+        <nav className="space-y-1 p-4 flex-1">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
+                  ? 'bg-amber-50 text-amber-900'
+                  : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
+                  }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-amber-600' : 'text-stone-400'}`} />
+                  {item.label}
+                </div>
+                {item.badge > 0 && (
+                  <Badge className={isActive ? 'bg-amber-200 text-amber-900' : 'bg-stone-200 text-stone-700'}>
+                    {item.badge}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* Mobile Nav (Fallback) */}
+      <div className="md:hidden w-full bg-white border-b border-stone-200 p-4">
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-medium border ${activeTab === item.id ? 'bg-stone-900 text-white border-stone-900' : 'bg-white text-stone-600 border-stone-200'}`}
+            >
+              {item.label}
+              {item.badge > 0 && ` (${item.badge})`}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <Card className="rounded-2xl border-stone-200">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-3">
-                  <Building2 className="w-5 h-5 text-blue-500" />
-                  <Badge variant="outline" className="text-xs text-emerald-600">
-                    +{stats.newRestaurants} this week
-                  </Badge>
-                </div>
-                <p className="text-3xl font-bold text-stone-900">{stats.totalRestaurants}</p>
-                <p className="text-sm text-stone-500">Total Restaurants</p>
-              </CardContent>
-            </Card>
-          </motion.div>
+      {/* Main Content Area */}
+      <main className="flex-1 w-full max-w-full overflow-hidden flex flex-col">
+        <div className="p-4 sm:p-6 lg:p-8 flex-1 overflow-y-auto">
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <Card className="rounded-2xl border-stone-200">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-3">
-                  <Users className="w-5 h-5 text-emerald-500" />
-                  <Badge variant="outline" className="text-xs text-emerald-600">
-                    +{stats.newUsers} this week
-                  </Badge>
-                </div>
-                <p className="text-3xl font-bold text-stone-900">{stats.totalUsers}</p>
-                <p className="text-sm text-stone-500">Total Users</p>
-              </CardContent>
-            </Card>
-          </motion.div>
+          {/* Overview Tab Content */}
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-bold text-stone-900 mb-1">Platform Overview</h2>
+                <p className="text-stone-500">Real-time key metrics and statistics.</p>
+              </div>
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-            <Card className="rounded-2xl border-stone-200">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-3">
-                  <Star className="w-5 h-5 text-amber-500" />
-                  {stats.flaggedReviews > 0 && (
-                    <Badge className="bg-red-100 text-red-700 text-xs">
-                      {stats.flaggedReviews} flagged
-                    </Badge>
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-stone-500">Total Restaurants</CardTitle>
+                    <Building2 className="w-4 h-4 text-amber-600" />
+                  </CardHeader>
+                  <CardContent>
+                    {statsLoading ? (
+                      <Skeleton className="h-8 w-16" />
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold text-stone-900">{dashboardStats?.totalRestaurants}</div>
+                        <p className="text-xs text-stone-500 mt-1">+{dashboardStats?.newRestaurants} this week</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-stone-500">Total Customers</CardTitle>
+                    <Users className="w-4 h-4 text-stone-400" />
+                  </CardHeader>
+                  <CardContent>
+                    {statsLoading ? (
+                      <Skeleton className="h-8 w-16" />
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold text-stone-900">{dashboardStats?.totalCustomers}</div>
+                        <p className="text-xs text-stone-500 mt-1">+{dashboardStats?.newCustomers} this week</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-stone-500">Total Owners</CardTitle>
+                    <Shield className="w-4 h-4 text-stone-400" />
+                  </CardHeader>
+                  <CardContent>
+                    {statsLoading ? (
+                      <Skeleton className="h-8 w-16" />
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold text-stone-900">{dashboardStats?.totalOwners}</div>
+                        <p className="text-xs text-stone-500 mt-1">+{dashboardStats?.newOwners} this week</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-stone-500">Platform Reviews</CardTitle>
+                    <Star className="w-4 h-4 text-stone-400" />
+                  </CardHeader>
+                  <CardContent>
+                    {statsLoading ? (
+                      <Skeleton className="h-8 w-16" />
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold text-stone-900">{dashboardStats?.totalReviews}</div>
+                        <p className="text-xs text-stone-500 mt-1">Total reviews given</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-stone-500">Total Reservations</CardTitle>
+                    <Calendar className="w-4 h-4 text-stone-400" />
+                  </CardHeader>
+                  <CardContent>
+                    {statsLoading ? (
+                      <Skeleton className="h-8 w-16" />
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold text-stone-900">{dashboardStats?.totalReservations}</div>
+                        <p className="text-xs text-stone-500 mt-1">+{dashboardStats?.newReservations} this week</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Charts Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Reservation Trend */}
+                <Card className="rounded-2xl border-stone-200 lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Reservation Activity (Last 7 Days)</CardTitle>
+                    <CardDescription>Daily booking trends across the platform</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[300px]">
+                    {statsLoading ? (
+                      <Skeleton className="w-full h-full" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={dashboardStats?.charts?.reservationTrend}>
+                          <defs>
+                            <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#d97706" stopOpacity={0.1} />
+                              <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+                          <XAxis
+                            dataKey="date"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: '#78716c', fontSize: 12 }}
+                            dy={10}
+                          />
+                          <YAxis
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: '#78716c', fontSize: 12 }}
+                          />
+                          <Tooltip
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="count"
+                            stroke="#d97706"
+                            strokeWidth={3}
+                            fillOpacity={1}
+                            fill="url(#colorCount)"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* User Distribution */}
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">User Distribution</CardTitle>
+                    <CardDescription>Breakdown by role</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[300px] flex items-center justify-center">
+                    {statsLoading ? (
+                      <Skeleton className="w-48 h-48 rounded-full" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={dashboardStats?.charts?.userDistribution}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            <Cell fill="#d97706" />
+                            <Cell fill="#78716c" />
+                          </Pie>
+                          <Tooltip />
+                          <Legend verticalAlign="bottom" height={36} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Restaurant Status */}
+                <Card className="rounded-2xl border-stone-200">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Restaurant Verification</CardTitle>
+                    <CardDescription>Verified vs Pending verification</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[300px] flex items-center justify-center">
+                    {statsLoading ? (
+                      <Skeleton className="w-48 h-48 rounded-full" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={dashboardStats?.charts?.restaurantStatus}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            <Cell fill="#10b981" />
+                            <Cell fill="#f59e0b" />
+                          </Pie>
+                          <Tooltip />
+                          <Legend verticalAlign="bottom" height={36} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Rating Distribution */}
+                <Card className="rounded-2xl border-stone-200 lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Review Ratings Distribution</CardTitle>
+                    <CardDescription>Frequency of each star rating across the platform</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[300px]">
+                    {statsLoading ? (
+                      <Skeleton className="w-full h-full" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={dashboardStats?.charts?.ratingDistribution}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+                          <XAxis
+                            dataKey="rating"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: '#78716c', fontSize: 12 }}
+                          />
+                          <YAxis
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: '#78716c', fontSize: 12 }}
+                          />
+                          <Tooltip
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                            cursor={{ fill: '#f5f5f4' }}
+                          />
+                          <Bar
+                            dataKey="count"
+                            fill="#d97706"
+                            radius={[4, 4, 0, 0]}
+                            barSize={40}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+
+          {/* Restaurants Tab Content */}
+          {
+            activeTab === 'restaurants' && (
+              <Card className="rounded-2xl border-stone-200">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Restaurant Management</CardTitle>
+                      <CardDescription>Verify and manage restaurant listings</CardDescription>
+                    </div>
+                    <div className="relative w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                      <Input
+                        placeholder="Search restaurants..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {restaurantsLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
+                    </div>
+                  ) : (
+                    <div className="w-full overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50">
+                            <TableHead>Restaurant</TableHead>
+                            <TableHead>Owner</TableHead>
+                            <TableHead>City</TableHead>
+                            <TableHead>Rating</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredRestaurants.map((restaurant) => (
+                            <TableRow key={restaurant.id}>
+                              <TableCell>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-stone-100">
+                                    {restaurant.cover_image && (
+                                      <img src={restaurant.cover_image} alt="" className="w-full h-full object-cover" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="font-medium">{restaurant.name}</p>
+                                    <p className="text-sm text-stone-500 capitalize">{restaurant.cuisine}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm">{restaurant.owner_email || '-'}</TableCell>
+                              <TableCell>{restaurant.city}</TableCell>
+                              <TableCell>
+                                {restaurant.average_rating > 0 ? (
+                                  <div className="flex items-center gap-1">
+                                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                                    {Number(restaurant.average_rating || 0).toFixed(1)}
+                                  </div>
+                                ) : '-'}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className={restaurant.is_verified
+                                  ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-100 text-amber-700 border-amber-200'
+                                }>
+                                  {restaurant.is_verified ? 'Verified' : 'Pending'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                      <MoreVertical className="w-4 h-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => navigate(`/AdminRestaurantReview?id=${restaurant.id}`)}>
+                                      <Eye className="w-4 h-4 mr-2" />
+                                      Review & Verify
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   )}
-                </div>
-                <p className="text-3xl font-bold text-stone-900">{stats.totalReviews}</p>
-                <p className="text-sm text-stone-500">Total Reviews</p>
-              </CardContent>
-            </Card>
-          </motion.div>
+                </CardContent>
+              </Card>
+            )
+          }
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-            <Card className="rounded-2xl border-stone-200">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-3">
-                  <Calendar className="w-5 h-5 text-purple-500" />
-                  <Badge variant="outline" className="text-xs text-emerald-600">
-                    +{stats.newReservations} this week
-                  </Badge>
-                </div>
-                <p className="text-3xl font-bold text-stone-900">{stats.totalReservations}</p>
-                <p className="text-sm text-stone-500">Total Reservations</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
-
-        {/* Main Content */}
-        <Tabs defaultValue="restaurants" className="w-full">
-          <TabsList className="w-full justify-start mb-8 bg-stone-100 rounded-xl p-1.5 h-auto overflow-x-auto">
-            <TabsTrigger value="restaurants" className="rounded-lg py-3 px-6">
-              <Building2 className="w-4 h-4 mr-2" />
-              Restaurants
-              {stats.pendingVerification > 0 && (
-                <Badge className="ml-2 bg-amber-100 text-amber-700">{stats.pendingVerification}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="reviews" className="rounded-lg py-3 px-6">
-              <Star className="w-4 h-4 mr-2" />
-              Reviews
-              {stats.flaggedReviews > 0 && (
-                <Badge className="ml-2 bg-red-100 text-red-700">{stats.flaggedReviews}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="users" className="rounded-lg py-3 px-6">
-              <Users className="w-4 h-4 mr-2" />
-              Users
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Restaurants Tab */}
-          <TabsContent value="restaurants">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Restaurant Management</CardTitle>
-                    <CardDescription>Verify and manage restaurant listings</CardDescription>
+          {/* Reviews Tab Content */}
+          {
+            activeTab === 'reviews' && (
+              <Card className="rounded-2xl border-stone-200">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Review Moderation</CardTitle>
+                      <CardDescription>Monitor and moderate user reviews</CardDescription>
+                    </div>
+                    <div className="relative w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                      <Input
+                        placeholder="Search reviews..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
                   </div>
-                  <div className="relative w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
-                    <Input
-                      placeholder="Search restaurants..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {restaurantsLoading ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-stone-50">
-                        <TableHead>Restaurant</TableHead>
-                        <TableHead>Owner</TableHead>
-                        <TableHead>City</TableHead>
-                        <TableHead>Rating</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredRestaurants.map((restaurant) => (
-                        <TableRow key={restaurant.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg overflow-hidden bg-stone-100">
-                                {restaurant.cover_image && (
-                                  <img src={restaurant.cover_image} alt="" className="w-full h-full object-cover" />
+                </CardHeader>
+                <CardContent>
+                  {reviewsLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {filteredReviews.slice(0, 20).map((review) => (
+                        <div
+                          key={review.id}
+                          className={`p-4 rounded-xl border ${review.is_flagged ? 'border-red-200 bg-red-50' : 'border-stone-200 bg-white'}`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="font-medium">{review.reviewer_name}</span>
+                                <div className="flex items-center gap-1">
+                                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                                  <span className="text-sm">{review.overall_rating}</span>
+                                </div>
+                                {review.is_flagged && (
+                                  <Badge className="bg-red-100 text-red-700">Flagged</Badge>
                                 )}
                               </div>
-                              <div>
-                                <p className="font-medium">{restaurant.name}</p>
-                                <p className="text-sm text-stone-500 capitalize">{restaurant.cuisine}</p>
-                              </div>
+                              <p className="text-sm text-stone-600 line-clamp-2">{review.review_text}</p>
+                              <p className="text-xs text-stone-400 mt-2">
+                                {review.created_date && format(parseISO(review.created_date), 'MMM d, yyyy')}
+                              </p>
                             </div>
-                          </TableCell>
-                          <TableCell className="text-sm">{restaurant.owner_email || '-'}</TableCell>
-                          <TableCell>{restaurant.city}</TableCell>
-                          <TableCell>
-                            {restaurant.average_rating > 0 ? (
-                              <div className="flex items-center gap-1">
-                                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                                {restaurant.average_rating.toFixed(1)}
-                              </div>
-                            ) : '-'}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={restaurant.is_verified 
-                              ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
-                              : 'bg-amber-100 text-amber-700 border-amber-200'
-                            }>
-                              {restaurant.is_verified ? 'Verified' : 'Pending'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -347,189 +678,236 @@ export default function AdminDashboard() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem>
-                                  <Eye className="w-4 h-4 mr-2" />
-                                  View Details
-                                </DropdownMenuItem>
-                                {!restaurant.is_verified ? (
+                                {!review.is_flagged ? (
                                   <DropdownMenuItem
-                                    onClick={() => verifyRestaurant.mutate({ id: restaurant.id, verified: true })}
-                                    className="text-emerald-600"
+                                    onClick={() => flagReview.mutate({ id: review.id, flagged: true })}
+                                    className="text-amber-600"
                                   >
-                                    <CheckCircle className="w-4 h-4 mr-2" />
-                                    Verify
+                                    <Flag className="w-4 h-4 mr-2" />
+                                    Flag Review
                                   </DropdownMenuItem>
                                 ) : (
                                   <DropdownMenuItem
-                                    onClick={() => verifyRestaurant.mutate({ id: restaurant.id, verified: false })}
-                                    className="text-red-600"
+                                    onClick={() => flagReview.mutate({ id: review.id, flagged: false })}
+                                    className="text-emerald-600"
                                   >
-                                    <XCircle className="w-4 h-4 mr-2" />
-                                    Revoke Verification
+                                    <CheckCircle className="w-4 h-4 mr-2" />
+                                    Unflag Review
                                   </DropdownMenuItem>
                                 )}
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setItemToDelete(review);
+                                    setDeleteType('review');
+                                    setIsDeleteDialogOpen(true);
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  Delete Review
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Reviews Tab */}
-          <TabsContent value="reviews">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Review Moderation</CardTitle>
-                    <CardDescription>Monitor and moderate user reviews</CardDescription>
-                  </div>
-                  <div className="relative w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
-                    <Input
-                      placeholder="Search reviews..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {reviewsLoading ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredReviews.slice(0, 20).map((review) => (
-                      <div 
-                        key={review.id}
-                        className={`p-4 rounded-xl border ${review.is_flagged ? 'border-red-200 bg-red-50' : 'border-stone-200 bg-white'}`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="font-medium">{review.reviewer_name}</span>
-                              <div className="flex items-center gap-1">
-                                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                                <span className="text-sm">{review.overall_rating}</span>
-                              </div>
-                              {review.is_flagged && (
-                                <Badge className="bg-red-100 text-red-700">Flagged</Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-stone-600 line-clamp-2">{review.review_text}</p>
-                            <p className="text-xs text-stone-400 mt-2">
-                              {review.created_date && format(parseISO(review.created_date), 'MMM d, yyyy')}
-                            </p>
                           </div>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {!review.is_flagged ? (
-                                <DropdownMenuItem
-                                  onClick={() => flagReview.mutate({ id: review.id, flagged: true })}
-                                  className="text-amber-600"
-                                >
-                                  <Flag className="w-4 h-4 mr-2" />
-                                  Flag Review
-                                </DropdownMenuItem>
-                              ) : (
-                                <DropdownMenuItem
-                                  onClick={() => flagReview.mutate({ id: review.id, flagged: false })}
-                                  className="text-emerald-600"
-                                >
-                                  <CheckCircle className="w-4 h-4 mr-2" />
-                                  Unflag Review
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem
-                                onClick={() => deleteReview.mutate(review.id)}
-                                className="text-red-600"
-                              >
-                                <XCircle className="w-4 h-4 mr-2" />
-                                Delete Review
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Users Tab */}
-          <TabsContent value="users">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>User Management</CardTitle>
-                    <CardDescription>View and manage platform users</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {usersLoading ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-stone-50">
-                        <TableHead>User</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Joined</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {users.slice(0, 20).map((u) => (
-                        <TableRow key={u.id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{u.full_name || 'No name'}</p>
-                              <p className="text-sm text-stone-500">{u.email}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={u.role === 'admin' 
-                              ? 'bg-purple-100 text-purple-700' 
-                              : 'bg-stone-100 text-stone-600'
-                            }>
-                              {u.role || 'user'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {u.created_date ? format(parseISO(u.created_date), 'MMM d, yyyy') : '-'}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className="bg-emerald-100 text-emerald-700">Active</Badge>
-                          </TableCell>
-                        </TableRow>
                       ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          }
+
+          {/* Customers Tab Content */}
+          {
+            activeTab === 'customers' && (
+              <Card className="rounded-2xl border-stone-200">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Customer Management</CardTitle>
+                      <CardDescription>View and manage platform customers</CardDescription>
+                    </div>
+                    <div className="relative w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                      <Input
+                        placeholder="Search customers..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {customersLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
+                    </div>
+                  ) : (
+                    <div className="w-full overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50">
+                            <TableHead>Customer</TableHead>
+                            <TableHead>Joined</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredCustomers.slice(0, 20).map((u) => (
+                            <TableRow key={u.id}>
+                              <TableCell>
+                                <div>
+                                  <p className="font-medium">{u.full_name || 'No name'}</p>
+                                  <p className="text-sm text-stone-500">{u.email}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {u.created_date ? format(parseISO(u.created_date), 'MMM d, yyyy') : '-'}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-emerald-100 text-emerald-700">Active</Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  onClick={() => {
+                                    setItemToDelete(u);
+                                    setDeleteType('customer');
+                                    setIsDeleteDialogOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          }
+
+          {/* Owners Tab Content */}
+          {
+            activeTab === 'owners' && (
+              <Card className="rounded-2xl border-stone-200">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Owner Management</CardTitle>
+                      <CardDescription>View and manage platform owners</CardDescription>
+                    </div>
+                    <div className="relative w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                      <Input
+                        placeholder="Search owners..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {ownersLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
+                    </div>
+                  ) : (
+                    <div className="w-full overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50">
+                            <TableHead>Owner</TableHead>
+                            <TableHead>Joined</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredOwners.slice(0, 20).map((u) => (
+                            <TableRow key={u.id}>
+                              <TableCell>
+                                <div>
+                                  <p className="font-medium">{u.full_name || 'No name'}</p>
+                                  <p className="text-sm text-stone-500">{u.email}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {u.created_date ? format(parseISO(u.created_date), 'MMM d, yyyy') : '-'}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-emerald-100 text-emerald-700">Active</Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  onClick={() => {
+                                    setItemToDelete(u);
+                                    setDeleteType('owner');
+                                    setIsDeleteDialogOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          }
+        </div>
+      </main>
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent className="rounded-2xl border-stone-200">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600" />
+              Confirm Deletion
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this {deleteType}? This action cannot be undone.
+              {itemToDelete && (
+                <div className="mt-2 p-3 bg-stone-50 rounded-lg border border-stone-100 italic text-stone-600 text-xs text-left">
+                  {deleteType === 'review' ? itemToDelete.review_text : (itemToDelete.full_name || itemToDelete.email)}
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white rounded-xl"
+              onClick={() => {
+                if (deleteType === 'review') {
+                  deleteReview.mutate(itemToDelete.id);
+                } else {
+                  deleteUserMutation.mutate(itemToDelete.id);
+                }
+                setIsDeleteDialogOpen(false);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

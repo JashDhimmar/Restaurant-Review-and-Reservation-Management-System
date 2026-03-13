@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import RestaurantService from '@/services/RestaurantService';
+import { Link } from 'react-router-dom';
 import RestaurantCard from '../components/restaurant/RestaurantCard';
 import SearchFilters from '../components/restaurant/SearchFilters';
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,9 +16,26 @@ export default function Home() {
     rating: 'all'
   });
 
+  // Redirect if logged in as owner or admin
+  React.useEffect(() => {
+    const userString = localStorage.getItem('table_taste_user');
+    if (userString) {
+      try {
+        const user = JSON.parse(userString);
+        if (user?.role === 'owner') {
+          window.location.href = '/OwnerDashboard';
+        } else if (user?.role === 'admin') {
+          window.location.href = '/AdminDashboard';
+        }
+      } catch (err) {
+        console.error("Home redirect failed", err);
+      }
+    }
+  }, []);
+
   const { data: restaurants = [], isLoading } = useQuery({
     queryKey: ['restaurants'],
-    queryFn: () => base44.entities.Restaurant.filter({ is_active: true }),
+    queryFn: () => RestaurantService.getRestaurants({ is_active: true }),
   });
 
   const filteredRestaurants = useMemo(() => {
@@ -25,7 +43,7 @@ export default function Home() {
       // Search filter
       if (filters.search) {
         const searchLower = filters.search.toLowerCase();
-        const matchesSearch = 
+        const matchesSearch =
           restaurant.name?.toLowerCase().includes(searchLower) ||
           restaurant.cuisine?.toLowerCase().includes(searchLower) ||
           restaurant.city?.toLowerCase().includes(searchLower) ||
@@ -66,7 +84,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-stone-50">
       {/* Hero Section */}
-      <section className="relative bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 overflow-hidden">
+      <section className="relative bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 ">
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-10">
           <div className="absolute inset-0" style={{
@@ -75,7 +93,7 @@ export default function Home() {
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32 relative">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
@@ -85,20 +103,20 @@ export default function Home() {
               <Sparkles className="w-4 h-4" />
               Discover Your Next Favorite
             </div>
-            
+
             <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
               Find & Book the
               <span className="block text-amber-400">Perfect Table</span>
             </h1>
-            
+
             <p className="text-lg text-stone-300 mb-10 max-w-2xl mx-auto">
               Explore curated restaurants, read authentic reviews, and secure your reservation in seconds.
             </p>
 
             {/* Search Bar in Hero */}
-            <div className="bg-white rounded-2xl p-2 shadow-2xl max-w-2xl mx-auto">
-              <SearchFilters 
-                filters={filters} 
+            <div className="relative z-30 bg-white rounded-2xl p-2 shadow-2xl max-w-2xl mx-auto">
+              <SearchFilters
+                filters={filters}
                 onFilterChange={setFilters}
               />
             </div>
@@ -108,7 +126,7 @@ export default function Home() {
         {/* Wave Divider */}
         <div className="absolute bottom-0 left-0 right-0">
           <svg viewBox="0 0 1440 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M0 120L60 110C120 100 240 80 360 70C480 60 600 60 720 65C840 70 960 80 1080 85C1200 90 1320 90 1380 90L1440 90V120H1380C1320 120 1200 120 1080 120C960 120 840 120 720 120C600 120 480 120 360 120C240 120 120 120 60 120H0Z" fill="#fafaf9"/>
+            <path d="M0 120L60 110C120 100 240 80 360 70C480 60 600 60 720 65C840 70 960 80 1080 85C1200 90 1320 90 1380 90L1440 90V120H1380C1320 120 1200 120 1080 120C960 120 840 120 720 120C600 120 480 120 360 120C240 120 120 120 60 120H0Z" fill="#fafaf9" />
           </svg>
         </div>
       </section>
@@ -117,7 +135,7 @@ export default function Home() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
         {/* Trending Section */}
         {trendingRestaurants.length > 0 && !filters.search && filters.cuisine === 'all' && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -132,7 +150,7 @@ export default function Home() {
                 <p className="text-sm text-stone-500">Popular picks by local foodies</p>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {trendingRestaurants.map((restaurant) => (
                 <RestaurantCard key={restaurant.id} restaurant={restaurant} />
@@ -184,7 +202,7 @@ export default function Home() {
               <p className="text-stone-500">Try adjusting your search or filters</p>
             </div>
           ) : (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
@@ -205,12 +223,14 @@ export default function Home() {
             Own a Restaurant?
           </h2>
           <p className="text-amber-100 text-lg mb-8 max-w-2xl mx-auto">
-            Join thousands of restaurants growing their business with TableTaste. 
+            Join thousands of restaurants growing their business with TableTaste.
             Get discovered by food lovers and manage your reservations effortlessly.
           </p>
-          <button className="bg-white text-amber-600 font-semibold px-8 py-4 rounded-full hover:bg-amber-50 transition-colors shadow-lg">
-            Partner With Us
-          </button>
+          <Link to="/PartnerWithUs">
+            <button className="bg-white text-amber-600 font-semibold px-8 py-4 rounded-full hover:bg-amber-50 transition-colors shadow-lg">
+              Partner With Us
+            </button>
+          </Link>
         </div>
       </section>
     </div>

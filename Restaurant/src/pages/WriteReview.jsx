@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { mockApi } from '@/services/api';
 import { useNavigate, Link } from 'react-router-dom';
 import { createPageUrl } from '../utils';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
-import { 
-  Star, 
-  ChevronLeft, 
-  Loader2, 
+import {
+  Star,
+  ChevronLeft,
+  Loader2,
   CheckCircle,
   UtensilsCrossed,
   Users,
@@ -34,9 +34,9 @@ export default function WriteReview() {
 
   useEffect(() => {
     const loadUser = async () => {
-      const isAuth = await base44.auth.isAuthenticated();
+      const isAuth = await mockApi.auth.isAuthenticated();
       if (isAuth) {
-        const userData = await base44.auth.me();
+        const userData = await mockApi.auth.me();
         setUser(userData);
       }
     };
@@ -45,7 +45,7 @@ export default function WriteReview() {
 
   const { data: reservations = [] } = useQuery({
     queryKey: ['reservation', reservationId],
-    queryFn: () => base44.entities.Reservation.filter({ id: reservationId }),
+    queryFn: () => mockApi.entities.Reservation.filter({ id: reservationId }),
     enabled: !!reservationId,
   });
 
@@ -53,7 +53,7 @@ export default function WriteReview() {
 
   const { data: restaurants = [] } = useQuery({
     queryKey: ['restaurant-for-review', reservation?.restaurant_id],
-    queryFn: () => base44.entities.Restaurant.filter({ id: reservation.restaurant_id }),
+    queryFn: () => mockApi.entities.Restaurant.filter({ id: reservation.restaurant_id }),
     enabled: !!reservation?.restaurant_id,
   });
 
@@ -62,19 +62,19 @@ export default function WriteReview() {
   const submitReview = useMutation({
     mutationFn: async (reviewData) => {
       // Create the review
-      await base44.entities.Review.create(reviewData);
-      
+      await mockApi.entities.Review.create(reviewData);
+
       // Mark reservation as reviewed
       if (reservationId) {
-        await base44.entities.Reservation.update(reservationId, { has_reviewed: true });
+        await mockApi.entities.Reservation.update(reservationId, { has_reviewed: true });
       }
 
       // Update restaurant average rating
-      const allReviews = await base44.entities.Review.filter({ restaurant_id: reviewData.restaurant_id });
+      const allReviews = await mockApi.entities.Review.filter({ restaurant_id: reviewData.restaurant_id });
       const totalRating = allReviews.reduce((sum, r) => sum + (r.overall_rating || 0), 0);
       const avgRating = totalRating / allReviews.length;
-      
-      await base44.entities.Restaurant.update(reviewData.restaurant_id, {
+
+      await mockApi.entities.Restaurant.update(reviewData.restaurant_id, {
         average_rating: avgRating,
         total_reviews: allReviews.length
       });
@@ -86,7 +86,7 @@ export default function WriteReview() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!overallRating || !reviewText.trim()) return;
 
     submitReview.mutate({
@@ -135,8 +135,8 @@ export default function WriteReview() {
         <div className="text-center">
           <Star className="w-16 h-16 text-stone-300 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-stone-900 mb-2">Sign in to write a review</h2>
-          <Button 
-            onClick={() => base44.auth.redirectToLogin(window.location.href)}
+          <Button
+            onClick={() => mockApi.auth.redirectToLogin()}
             className="bg-amber-500 hover:bg-amber-600"
           >
             Sign In
@@ -153,7 +153,7 @@ export default function WriteReview() {
       {/* Header */}
       <div className="bg-white border-b border-stone-200">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <Link 
+          <Link
             to={createPageUrl('MyReservations')}
             className="inline-flex items-center gap-2 text-stone-500 hover:text-stone-700 mb-4"
           >
@@ -183,11 +183,10 @@ export default function WriteReview() {
                   className="p-1 transition-transform hover:scale-110"
                 >
                   <Star
-                    className={`w-10 h-10 transition-colors ${
-                      star <= (hoverRating || overallRating)
-                        ? 'fill-amber-400 text-amber-400'
-                        : 'text-stone-200'
-                    }`}
+                    className={`w-10 h-10 transition-colors ${star <= (hoverRating || overallRating)
+                      ? 'fill-amber-400 text-amber-400'
+                      : 'text-stone-200'
+                      }`}
                   />
                 </button>
               ))}
@@ -202,7 +201,7 @@ export default function WriteReview() {
           {/* Aspect Ratings */}
           <div className="bg-white rounded-2xl p-6 border border-stone-200 space-y-6">
             <h3 className="font-semibold text-stone-900">Rate Different Aspects</h3>
-            
+
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="flex items-center gap-2 text-stone-700">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { mockApi } from '@/services/api';
+import OwnerSidebar from '@/components/owner/OwnerSidebar';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '../utils';
 import { Button } from "@/components/ui/button";
@@ -23,10 +24,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Building2, 
-  MapPin, 
-  Phone, 
+import {
+  Building2,
+  MapPin,
+  Phone,
   Globe,
   Clock,
   Image as ImageIcon,
@@ -34,9 +35,11 @@ import {
   CheckCircle,
   Plus,
   X,
-  ChevronLeft
+  ChevronLeft,
+  AlertCircle
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useToast } from "@/components/ui/use-toast";
 
 const cuisineOptions = [
   { value: 'italian', label: 'Italian' },
@@ -65,6 +68,8 @@ export default function OwnerRestaurant() {
   const [user, setUser] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState('basic');
+  const { toast } = useToast();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -78,6 +83,7 @@ export default function OwnerRestaurant() {
     email: '',
     website: '',
     cover_image: '',
+    cover_image_file: null,
     gallery: [],
     opening_hours: {},
     features: [],
@@ -90,9 +96,9 @@ export default function OwnerRestaurant() {
 
   useEffect(() => {
     const loadUser = async () => {
-      const isAuth = await base44.auth.isAuthenticated();
+      const isAuth = await mockApi.auth.isAuthenticated();
       if (isAuth) {
-        const userData = await base44.auth.me();
+        const userData = await mockApi.auth.me();
         setUser(userData);
       }
     };
@@ -101,7 +107,7 @@ export default function OwnerRestaurant() {
 
   const { data: restaurants = [], isLoading } = useQuery({
     queryKey: ['owner-restaurants', user?.email],
-    queryFn: () => base44.entities.Restaurant.filter({ owner_email: user.email }),
+    queryFn: () => mockApi.entities.Restaurant.filter({ owner_email: user.email }),
     enabled: !!user?.email,
   });
 
@@ -112,15 +118,16 @@ export default function OwnerRestaurant() {
       setFormData({
         name: restaurant.name || '',
         description: restaurant.description || '',
-        cuisine: restaurant.cuisine || '',
+        cuisine: restaurant.cuisine ? restaurant.cuisine.toLowerCase() : '',
         price_range: restaurant.price_range || '',
         address: restaurant.address || '',
         city: restaurant.city || '',
         phone: restaurant.phone || '',
-        email: restaurant.email || '',
+        email: restaurant.owner_email || '',
         website: restaurant.website || '',
-        cover_image: restaurant.cover_image || '',
-        gallery: restaurant.gallery || [],
+        cover_image: restaurant.cover_image_source || '',
+        cover_image_file: null,
+        gallery: restaurant.gallery ? restaurant.gallery.map(img => img.image_source) : [],
         opening_hours: restaurant.opening_hours || {},
         features: restaurant.features || [],
         table_capacity: restaurant.table_capacity || 0
@@ -129,7 +136,7 @@ export default function OwnerRestaurant() {
   }, [restaurant]);
 
   const updateRestaurant = useMutation({
-    mutationFn: (data) => base44.entities.Restaurant.update(restaurant.id, data),
+    mutationFn: (data) => mockApi.entities.Restaurant.update(restaurant.id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['owner-restaurants'] });
       setSaveSuccess(true);
@@ -139,8 +146,63 @@ export default function OwnerRestaurant() {
 
   const handleSave = async () => {
     setIsSaving(true);
-    await updateRestaurant.mutateAsync(formData);
-    setIsSaving(false);
+    try {
+      // Strictly only send fields the backend expects in RestaurantWriteSerializer
+      const dataToSend = {
+        name: formData.name,
+        cuisine: formData.cuisine,
+        description: formData.description,
+        city: formData.city,
+        address: formData.address,
+        price_range: formData.price_range,
+        phone: formData.phone,
+        website: formData.website,
+        table_capacity: formData.table_capacity,
+        opening_hours: formData.opening_hours,
+        features: formData.features,
+        gallery: formData.gallery.filter(item => {
+          if (item instanceof File) return true;
+          if (typeof item === 'string') return !item.startsWith('blob:');
+          return true;
+        }),
+      };
+
+      // Handle Image logic
+      if (formData.cover_image_file) {
+        dataToSend.cover_image = formData.cover_image_file;
+      } else if (typeof formData.cover_image === 'string' && !formData.cover_image.startsWith('blob:')) {
+        dataToSend.cover_image_url = formData.cover_image;
+      }
+
+      await updateRestaurant.mutateAsync(dataToSend);
+      toast({
+        title: "Success",
+        description: "Restaurant details updated successfully.",
+      });
+    } catch (error) {
+      console.error("Save error:", error);
+
+      // More descriptive error parsing
+      let errorMsg = "Failed to save changes. Please check your connection.";
+      if (error.response?.data) {
+        const errors = error.response.data;
+        if (typeof errors === 'object') {
+          errorMsg = Object.entries(errors)
+            .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
+            .join(' | ');
+        } else if (typeof errors === 'string') {
+          errorMsg = errors;
+        }
+      }
+
+      toast({
+        title: "Error Saving Changes",
+        description: errorMsg,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleOpeningHoursChange = (day, value) => {
@@ -174,12 +236,16 @@ export default function OwnerRestaurant() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    
+    const file_url = URL.createObjectURL(file);
+
     if (type === 'cover') {
-      setFormData(prev => ({ ...prev, cover_image: file_url }));
+      setFormData(prev => ({
+        ...prev,
+        cover_image: file_url,
+        cover_image_file: file
+      }));
     } else {
-      setFormData(prev => ({ ...prev, gallery: [...prev.gallery, file_url] }));
+      setFormData(prev => ({ ...prev, gallery: [...prev.gallery, file] }));
     }
   };
 
@@ -216,336 +282,354 @@ export default function OwnerRestaurant() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      {/* Header */}
-      <div className="bg-white border-b border-stone-200">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <Link 
-            to={createPageUrl('OwnerDashboard')}
-            className="inline-flex items-center gap-2 text-stone-500 hover:text-stone-700 mb-4"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Back to Dashboard
-          </Link>
-          <div className="flex items-center justify-between">
+    <div className="flex min-h-screen bg-stone-50">
+      <OwnerSidebar activePage="settings" />
+
+      <div className="flex-1 min-w-0">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
+          {/* Header */}
+          <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8 mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div>
-              <h1 className="font-display text-2xl font-bold text-stone-900">
-                Edit Restaurant
-              </h1>
-              <p className="text-stone-500">Update your restaurant information</p>
+              <h1 className="font-display text-2xl font-bold text-stone-900">Restaurant Settings</h1>
+              <p className="text-stone-500 mt-1">Manage your restaurant's profile, photos, and availability</p>
             </div>
             <div className="flex items-center gap-3">
               {saveSuccess && (
-                <motion.span 
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="flex items-center gap-1 text-emerald-600 text-sm"
+                <motion.span
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-emerald-50 px-4 py-2 rounded-xl flex items-center gap-2 text-emerald-600 text-xs font-bold border border-emerald-100 shadow-sm"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  Saved!
+                  CHANGES SAVED
                 </motion.span>
               )}
-              <Button 
+              <Button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="bg-amber-500 hover:bg-amber-600"
+                className="bg-stone-900 hover:bg-stone-800 text-white rounded-xl px-8 h-12 font-bold shadow-lg shadow-stone-200 transition-all active:scale-95"
               >
                 {isSaving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
-                  'Save Changes'
+                  'Save Settings'
                 )}
               </Button>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="w-full justify-start mb-8 bg-stone-100 rounded-xl p-1.5 h-auto overflow-x-auto">
-            <TabsTrigger value="basic" className="rounded-lg py-3 px-6">Basic Info</TabsTrigger>
-            <TabsTrigger value="images" className="rounded-lg py-3 px-6">Images</TabsTrigger>
-            <TabsTrigger value="hours" className="rounded-lg py-3 px-6">Hours</TabsTrigger>
-            <TabsTrigger value="features" className="rounded-lg py-3 px-6">Features</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="basic">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <CardTitle>Basic Information</CardTitle>
-                <CardDescription>Your restaurant's essential details</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div className="sm:col-span-2">
-                    <Label htmlFor="name">Restaurant Name</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                      className="h-12 mt-2"
-                    />
-                  </div>
-                  
-                  <div className="sm:col-span-2">
-                    <Label htmlFor="description">Description</Label>
-                    <Textarea
-                      id="description"
-                      value={formData.description}
-                      onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                      className="mt-2 min-h-24"
-                      placeholder="Tell customers about your restaurant..."
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Cuisine Type</Label>
-                    <Select 
-                      value={formData.cuisine} 
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, cuisine: value }))}
-                    >
-                      <SelectTrigger className="h-12 mt-2">
-                        <SelectValue placeholder="Select cuisine" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cuisineOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Price Range</Label>
-                    <Select 
-                      value={formData.price_range} 
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, price_range: value }))}
-                    >
-                      <SelectTrigger className="h-12 mt-2">
-                        <SelectValue placeholder="Select price range" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {priceRangeOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <Label htmlFor="address">Address</Label>
-                    <Input
-                      id="address"
-                      value={formData.address}
-                      onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
-                      className="h-12 mt-2"
-                      placeholder="Street address"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="city">City</Label>
-                    <Input
-                      id="city"
-                      value={formData.city}
-                      onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
-                      className="h-12 mt-2"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="phone">Phone</Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                      className="h-12 mt-2"
-                      placeholder="+1 (555) 000-0000"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                      className="h-12 mt-2"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="website">Website</Label>
-                    <Input
-                      id="website"
-                      value={formData.website}
-                      onChange={(e) => setFormData(prev => ({ ...prev, website: e.target.value }))}
-                      className="h-12 mt-2"
-                      placeholder="https://..."
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="capacity">Table Capacity</Label>
-                    <Input
-                      id="capacity"
-                      type="number"
-                      value={formData.table_capacity}
-                      onChange={(e) => setFormData(prev => ({ ...prev, table_capacity: parseInt(e.target.value) || 0 }))}
-                      className="h-12 mt-2"
-                      placeholder="Total seating capacity"
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="images">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <CardTitle>Images</CardTitle>
-                <CardDescription>Showcase your restaurant with photos</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Cover Image */}
-                <div>
-                  <Label>Cover Image</Label>
-                  <div className="mt-2">
+          <div className="flex flex-col lg:flex-row gap-8 items-start">
+            {/* Inner Sidebar / Tabs */}
+            <div className="w-full lg:w-[300px] bg-white rounded-2xl shadow-sm border border-stone-200 flex flex-col shrink-0 overflow-hidden sticky top-8">
+              <div className="p-8 flex flex-col items-center border-b border-stone-100 text-center bg-stone-50/50">
+                <div className="relative mb-4 group cursor-pointer" onClick={() => setActiveTab('images')}>
+                  <div className="w-24 h-24 rounded-2xl bg-white flex items-center justify-center border-2 border-stone-200 shadow-sm overflow-hidden group-hover:border-amber-400 transition-colors">
                     {formData.cover_image ? (
-                      <div className="relative aspect-video rounded-xl overflow-hidden">
-                        <img 
-                          src={formData.cover_image} 
-                          alt="Cover" 
-                          className="w-full h-full object-cover"
-                        />
-                        <Button
-                          size="icon"
-                          variant="secondary"
-                          className="absolute top-2 right-2"
-                          onClick={() => setFormData(prev => ({ ...prev, cover_image: '' }))}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
+                      <img src={formData.cover_image} alt="Restaurant" className="w-full h-full object-cover" />
                     ) : (
-                      <label className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-stone-200 rounded-xl cursor-pointer hover:bg-stone-50 transition-colors">
-                        <ImageIcon className="w-8 h-8 text-stone-400 mb-2" />
-                        <span className="text-sm text-stone-500">Click to upload cover image</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleImageUpload(e, 'cover')}
-                        />
-                      </label>
+                      <Building2 className="w-10 h-10 text-stone-300" />
                     )}
                   </div>
-                </div>
-
-                {/* Gallery */}
-                <div>
-                  <Label>Gallery</Label>
-                  <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    {formData.gallery.map((img, idx) => (
-                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden">
-                        <img src={img} alt={`Gallery ${idx + 1}`} className="w-full h-full object-cover" />
-                        <Button
-                          size="icon"
-                          variant="secondary"
-                          className="absolute top-2 right-2 h-7 w-7"
-                          onClick={() => removeGalleryImage(idx)}
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    ))}
-                    <label className="flex flex-col items-center justify-center aspect-square border-2 border-dashed border-stone-200 rounded-xl cursor-pointer hover:bg-stone-50 transition-colors">
-                      <Plus className="w-6 h-6 text-stone-400 mb-1" />
-                      <span className="text-xs text-stone-500">Add Photo</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleImageUpload(e, 'gallery')}
-                      />
-                    </label>
+                  <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-amber-500 rounded-lg flex items-center justify-center text-white border-2 border-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ImageIcon className="w-4 h-4" />
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                <h2 className="font-bold text-stone-900 line-clamp-1">{formData.name || 'Your Restaurant'}</h2>
+                <p className="text-[10px] text-stone-400 mt-1 uppercase tracking-widest font-bold">{formData.cuisine || 'Cuisine Type'}</p>
+              </div>
 
-          <TabsContent value="hours">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <CardTitle>Opening Hours</CardTitle>
-                <CardDescription>Set your restaurant's operating hours</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {daysOfWeek.map((day) => (
-                    <div key={day} className="flex items-center gap-4">
-                      <span className="w-28 capitalize text-stone-700">{day}</span>
-                      <Input
-                        value={formData.opening_hours[day] || ''}
-                        onChange={(e) => handleOpeningHoursChange(day, e.target.value)}
-                        placeholder="e.g., 11:00 AM - 10:00 PM"
-                        className="flex-1"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+              <nav className="p-3 space-y-1">
+                {[
+                  { id: 'basic', label: 'Basic Profile', icon: Building2 },
+                  { id: 'images', label: 'Visual Gallery', icon: ImageIcon },
+                  { id: 'hours', label: 'Opening Hours', icon: Clock },
+                  { id: 'features', label: 'Restaurant Features', icon: CheckCircle },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-4 w-full px-5 py-3.5 rounded-xl text-sm font-bold transition-all ${
+                      activeTab === tab.id
+                        ? 'bg-amber-50 text-amber-900 border-l-4 border-amber-500'
+                        : 'text-stone-500 hover:bg-stone-50 hover:text-stone-900'
+                    }`}
+                  >
+                    <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-amber-500' : 'text-stone-400'}`} />
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
+            </div>
 
-          <TabsContent value="features">
-            <Card className="rounded-2xl border-stone-200">
-              <CardHeader>
-                <CardTitle>Features & Amenities</CardTitle>
-                <CardDescription>Highlight what makes your restaurant special</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-2 mb-4">
-                  <Input
-                    value={newFeature}
-                    onChange={(e) => setNewFeature(e.target.value)}
-                    placeholder="Add a feature (e.g., Outdoor Seating, WiFi)"
-                    onKeyPress={(e) => e.key === 'Enter' && addFeature()}
-                  />
-                  <Button onClick={addFeature} variant="outline">
-                    <Plus className="w-4 h-4" />
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {formData.features.map((feature, idx) => (
-                    <span 
-                      key={idx}
-                      className="inline-flex items-center gap-2 bg-stone-100 text-stone-700 rounded-full px-4 py-2"
-                    >
-                      {feature}
-                      <button 
-                        onClick={() => removeFeature(feature)}
-                        className="text-stone-400 hover:text-stone-600"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </span>
-                  ))}
-                  {formData.features.length === 0 && (
-                    <p className="text-stone-500 text-sm">No features added yet</p>
+            {/* Content Area */}
+            <div className="flex-1 w-full">
+              <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden relative min-h-[600px]">
+                <div className="p-8 sm:p-10">
+                  {/* Basic Info Tab */}
+                  {activeTab === 'basic' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-12">
+                      <section>
+                        <div className="flex items-center gap-2 mb-8">
+                          <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                          <h3 className="text-lg font-bold text-stone-900">General Information</h3>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="md:col-span-2">
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Restaurant Name</Label>
+                            <Input
+                              value={formData.name}
+                              onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                              className="h-12 rounded-xl border-stone-200 focus:border-amber-500 focus:ring-amber-500 bg-stone-50/30"
+                            />
+                          </div>
+                          <div className="md:col-span-2">
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Short Bio / Description</Label>
+                            <Textarea
+                              value={formData.description}
+                              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                              className="rounded-xl border-stone-200 focus:border-amber-500 focus:ring-amber-500 bg-stone-50/30 min-h-[120px]"
+                              placeholder="Describe your restaurant's unique experience..."
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Cuisine Type</Label>
+                            <Select
+                              value={formData.cuisine}
+                              onValueChange={(value) => setFormData(prev => ({ ...prev, cuisine: value }))}
+                            >
+                              <SelectTrigger className="h-12 border-stone-200 rounded-xl bg-stone-50/30">
+                                <SelectValue placeholder="Select cuisine" />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl">
+                                {cuisineOptions.map(opt => (
+                                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Pricing Tier</Label>
+                            <Select
+                              value={formData.price_range}
+                              onValueChange={(value) => setFormData(prev => ({ ...prev, price_range: value }))}
+                            >
+                              <SelectTrigger className="h-12 border-stone-200 rounded-xl bg-stone-50/30">
+                                <SelectValue placeholder="Select price range" />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl">
+                                {priceRangeOptions.map(opt => (
+                                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section>
+                        <div className="flex items-center gap-2 mb-8">
+                          <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                          <h3 className="text-lg font-bold text-stone-900">Communication & Address</h3>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="md:col-span-2">
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Physical Address</Label>
+                            <Input
+                              value={formData.address}
+                              onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                              className="h-12 border-stone-200 rounded-xl bg-stone-50/30"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Locality / City</Label>
+                            <Input
+                              value={formData.city}
+                              onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
+                              className="h-12 border-stone-200 rounded-xl bg-stone-50/30"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Public Contact Number</Label>
+                            <Input
+                              value={formData.phone}
+                              onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                              className="h-12 border-stone-200 rounded-xl bg-stone-50/30"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Official Website (Optional)</Label>
+                            <Input
+                              value={formData.website}
+                              onChange={(e) => setFormData(prev => ({ ...prev, website: e.target.value }))}
+                              className="h-12 border-stone-200 rounded-xl bg-stone-50/30"
+                              placeholder="https://..."
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-2 block ml-1">Max Seating Capacity</Label>
+                            <Input
+                              type="number"
+                              value={formData.table_capacity}
+                              onChange={(e) => setFormData(prev => ({ ...prev, table_capacity: parseInt(e.target.value) || 0 }))}
+                              className="h-12 border-stone-200 rounded-xl bg-stone-50/30"
+                            />
+                          </div>
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {/* Images Tab */}
+                  {activeTab === 'images' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-12">
+                      <section>
+                        <div className="flex items-center gap-2 mb-8">
+                          <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                          <h3 className="text-lg font-bold text-stone-900">Brand Representation</h3>
+                        </div>
+                        <div className="space-y-10">
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-4 block ml-1">Primary Cover Photo</Label>
+                            {formData.cover_image ? (
+                              <div className="relative aspect-video rounded-3xl overflow-hidden border border-stone-200 group shadow-sm">
+                                <img src={formData.cover_image} alt="Cover" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="rounded-xl font-bold gap-2"
+                                    onClick={() => setFormData(prev => ({ ...prev, cover_image: '' }))}
+                                  >
+                                    <X className="w-4 h-4" />
+                                    Change Photo
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="flex flex-col items-center justify-center p-16 border-2 border-dashed border-stone-200 rounded-3xl cursor-pointer hover:bg-stone-50/50 transition-all group bg-stone-50/20">
+                                <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center mb-4 border border-stone-100 shadow-sm group-hover:scale-110 transition-transform">
+                                  <ImageIcon className="w-7 h-7 text-stone-300 group-hover:text-amber-500 transition-colors" />
+                                </div>
+                                <span className="text-sm font-bold text-stone-600">Click to upload cover image</span>
+                                <p className="text-xs text-stone-400 mt-1">Recommended: 1200x800px or larger</p>
+                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'cover')} />
+                              </label>
+                            )}
+                          </div>
+
+                          <div>
+                            <Label className="text-xs font-bold text-stone-400 tracking-widest uppercase mb-4 block ml-1">Restaurant Gallery</Label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                              {formData.gallery.map((img, idx) => {
+                                const isFile = img instanceof File;
+                                const src = isFile ? URL.createObjectURL(img) : img;
+                                return (
+                                  <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border border-stone-200 group shadow-sm">
+                                    <img src={src} alt={`Gallery ${idx + 1}`} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                                    <Button
+                                      size="icon"
+                                      variant="destructive"
+                                      className="absolute top-2 right-2 h-7 w-7 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                      onClick={() => removeGalleryImage(idx)}
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                );
+                              })}
+                              <label className="flex flex-col items-center justify-center aspect-square border-2 border-dashed border-stone-200 rounded-2xl cursor-pointer hover:bg-stone-50/50 transition-all group bg-stone-50/20">
+                                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center border border-stone-100 shadow-sm group-hover:scale-110 transition-transform">
+                                  <Plus className="w-6 h-6 text-stone-300 group-hover:text-amber-500 transition-colors" />
+                                </div>
+                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'gallery')} />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {/* Hours Tab */}
+                  {activeTab === 'hours' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+                       <section>
+                        <div className="flex items-center gap-2 mb-8">
+                          <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                          <h3 className="text-lg font-bold text-stone-900">Weekly Schedule</h3>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3">
+                          {daysOfWeek.map((day) => (
+                            <div key={day} className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 border border-stone-100 rounded-2xl bg-stone-50/30 group hover:bg-stone-50 transition-colors">
+                              <span className="w-28 capitalize font-bold text-stone-700 text-sm">{day}</span>
+                              <div className="flex-1 flex items-center gap-4">
+                                <Clock className="w-4 h-4 text-stone-300" />
+                                <Input
+                                  value={formData.opening_hours[day] || ''}
+                                  onChange={(e) => handleOpeningHoursChange(day, e.target.value)}
+                                  placeholder="Ex: 09:00 AM - 11:00 PM"
+                                  className="flex-1 border-stone-200 rounded-xl h-11 focus:border-amber-500 focus:ring-amber-500 bg-white"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {/* Features Tab */}
+                  {activeTab === 'features' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-10">
+                      <section>
+                        <div className="flex items-center gap-2 mb-8">
+                          <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                          <h3 className="text-lg font-bold text-stone-900">Amenities & Highlights</h3>
+                        </div>
+                        <div className="flex gap-3 mb-10">
+                          <div className="relative flex-1">
+                            <Plus className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                            <Input
+                              value={newFeature}
+                              onChange={(e) => setNewFeature(e.target.value)}
+                              placeholder="Describe feature (e.g. Free Wi-Fi, Rooftop Seating)"
+                              className="pl-11 h-12 border-stone-200 rounded-xl focus:border-amber-500 focus:ring-amber-500 bg-stone-50/30"
+                              onKeyPress={(e) => e.key === 'Enter' && addFeature()}
+                            />
+                          </div>
+                          <Button onClick={addFeature} className="bg-stone-900 hover:bg-stone-800 text-white px-8 h-12 rounded-xl font-bold shadow-md transition-all active:scale-95">
+                            Add Tag
+                          </Button>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-3">
+                          {formData.features.map((feature, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center gap-2.5 bg-white text-stone-700 border border-stone-200 rounded-xl px-5 py-3 text-sm font-bold shadow-sm hover:border-amber-300 hover:bg-amber-50/30 transition-all hover:-translate-y-0.5"
+                            >
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
+                              {feature}
+                              <button onClick={() => removeFeature(feature)} className="ml-1 text-stone-300 hover:text-red-500 transition-colors">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                          {formData.features.length === 0 && (
+                            <div className="w-full py-16 text-center bg-stone-50/50 rounded-2xl border-2 border-dashed border-stone-200">
+                              <AlertCircle className="w-10 h-10 text-stone-200 mx-auto mb-3" />
+                              <p className="text-stone-400 font-medium">Highlight your best amenities to attract more diners!</p>
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    </motion.div>
                   )}
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
